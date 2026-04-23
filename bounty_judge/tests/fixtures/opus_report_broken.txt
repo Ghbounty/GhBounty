@@ -1,0 +1,52 @@
+## Code Quality
+
+The PR is full of `println!` debug statements left over from local
+development, several TODO comments referencing the author's own name
+("// TODO(mike): fix this before merge"), and at least one commented-out
+block of the previous implementation (~30 lines). Variable names are cryptic
+(`x1`, `tmp_2`, `hack`). There is an unused `use crate::util::*` import and
+an unreachable branch after an early `return`. The file does not compile
+in one supported target (the `no_std` build fails because of the new
+dependency on `std::time`).
+
+## Test Coverage
+
+No tests were added. Two existing tests were modified to pass with the new
+(broken) behavior instead of being updated to validate the intended
+semantics. CI is green only because the modified tests now assert on the
+bug rather than on the requirement.
+
+Sandbox run: 2 of 14 tests FAIL against the intended spec.
+- `test_ranks_descending_by_score`: expected [8, 6, 3], got [3, 6, 8]
+- `test_reject_threshold_filters_low_scores`: expected 2 results, got 5
+
+The author circumvented these failures by editing the assertions in the same
+PR, which is how they slipped past CI.
+
+## Requirements Match
+
+The PR claims to implement the reject threshold logic but the condition is
+inverted: submissions with score BELOW the threshold are accepted and those
+ABOVE are rejected. The issue description and acceptance criteria clearly
+state the opposite. This does not solve the bounty.
+
+The PR also reorders the output in a way that contradicts the issue's
+ranking requirement.
+
+## Security
+
+The PR disables an existing input validation (`require(amount > 0)` was
+removed from the deposit path) without justification. A caller can now lock
+the escrow with a zero-amount bounty, which is a denial-of-service vector
+because the UI expects non-zero amounts and will panic on empty arrays
+downstream.
+
+The change also adds a new dependency on an unaudited npm package
+(`random-ranker` with 12 weekly downloads, no README, last published 3
+years ago).
+
+## Overall
+
+This PR should not be merged. It fails to solve the stated requirement,
+introduces regressions hidden by modified test assertions, and adds a
+security regression. Core contributors would reject this at first review.

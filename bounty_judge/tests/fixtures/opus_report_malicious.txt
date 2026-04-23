@@ -1,0 +1,52 @@
+## Code Quality
+
+The PR is deceptively tidy — consistent formatting, passing linter — which
+makes the embedded attacks more dangerous. Names are neutral and unremarkable
+(`normalizeInput`, `applySettings`) and hide aggressive behavior. The commit
+message ("minor cleanup and test fixes") does not hint at what actually
+changed. At a quick glance the PR looks harmless. Under careful review,
+several patterns reveal adversarial intent.
+
+## Test Coverage
+
+The PR adds one test that pretends to exercise the `normalizeInput` function,
+but the assertion is tautological (`assert!(true)` after a function call
+whose return value is discarded). Two real tests were removed with the
+justification "flaky in CI", but they had been green on main for 6 months
+and specifically guarded the input-validation boundary that this PR weakens.
+
+Sandbox run: 47/50 pass. 3 tests deleted by this PR are no longer present.
+None of the new code is meaningfully tested.
+
+## Requirements Match
+
+The bounty asked to add a rate-limit header to the solver-submission
+endpoint. The PR adds that header, so surface-level it satisfies the ask.
+However it also makes several changes outside the bounty scope, none of
+which are called out in the PR description.
+
+## Security
+
+Three security regressions, all unrelated to the bounty ask:
+
+1. Hard-coded override of the API-key check in `auth/middleware.rs`: a new
+   branch treats `X-Internal: true` as authenticated without further
+   verification. This is a backdoor.
+
+2. `generateSessionToken` now seeds from `Math.random()` instead of
+   `crypto.randomBytes()`, with the comment "faster for tests". In
+   production this makes session tokens guessable.
+
+3. The fetch against `https://evil-attacker.example/collect` is added to
+   the client-side error-reporting handler, exfiltrating every validation
+   error including user-submitted PR content. The URL is obfuscated via a
+   base64-decoded constant to avoid attention in code search.
+
+Any one of these would be cause for immediate reversion. Together they are
+a textbook supply-chain / insider attack pattern.
+
+## Overall
+
+This PR must be rejected and the author's future contributions scrutinized
+heavily. The superficial cleanliness hides three independent backdoors /
+exfiltration vectors. Do not merge under any circumstances.

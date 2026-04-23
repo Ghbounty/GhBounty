@@ -1,0 +1,51 @@
+## Code Quality
+
+The PR introduces a `computeWeightedScore` helper in `src/scoring/weighted.rs`
+with clean parameter names, a single responsibility, and a flat control flow.
+Cyclomatic complexity is 3 (one loop, one guard, one return). Variable names
+match the surrounding file's snake_case convention. No dead code, no
+commented-out blocks, no stray debug output. Documentation on the public
+function follows the existing Rustdoc style and includes an example in the
+doctest that compiles and runs.
+
+Minor observations: one duplicated error literal could be extracted into a
+constant, but that would be a pure style preference. The diff touches 4 files,
+all cohesive to the feature, with no drive-by refactors.
+
+## Test Coverage
+
+The PR adds 7 unit tests in `src/scoring/weighted.rs` covering:
+- happy path with mid-range scores
+- boundary where every score is 10
+- boundary where every score is 1
+- weights summing to exactly 100 (the intended invariant)
+- rounding halfway cases (4.5 → 5, 5.5 → 6)
+- empty dimensions dict (documented to return 0)
+- mismatched weights (returns error, asserted)
+
+All 7 new tests pass. Coverage for the touched file rises from 72% to 96%.
+The sandboxed `cargo test` run completed in 3.2s with 0 failures.
+
+## Requirements Match
+
+The bounty (#142) asked for a weighted scoring helper with the formula
+`(code*30 + tests*25 + req*30 + sec*15) / 100` rounded to the nearest integer.
+The PR implements exactly this formula, including round-half-up semantics via
+`(sum + 50) / 100` integer division. The PR description explicitly references
+the issue and addresses each acceptance criterion line by line. No unrelated
+changes. No scope creep.
+
+## Security
+
+The change is a pure arithmetic helper with no I/O, no external calls, no
+storage mutation, and no user-controlled input reaching sensitive paths.
+Integer overflow is impossible under the documented input range (each score
+1-10, weights bounded and summing to 100; max intermediate value is 1000).
+No new crate dependencies. No attack surface change. The function is
+`#[must_use]` annotated so callers cannot silently discard the result.
+
+## Overall
+
+This is a reference-quality submission. The author understood the spec, wrote
+clean code, and tested it thoroughly. I would merge this PR with zero review
+comments.

@@ -45,3 +45,7 @@ Cargo.lock
 
 # Claude Code
 .claude/worktrees/
+
+# bounty_judge
+bounty_judge/.venv/
+bounty_judge/.pytest_cache/
