@@ -1,0 +1,480 @@
+{
+  "address": "CPZx26QXs3HjwGobr8cVAZEtF1qGzqnNbBdt7h1EwbBg",
+  "metadata": {
+    "name": "ghbounty_escrow",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "cancel_bounty",
+      "discriminator": [
+        79,
+        65,
+        107,
+        143,
+        128,
+        165,
+        135,
+        46
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bounty",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_bounty",
+      "discriminator": [
+        122,
+        90,
+        14,
+        143,
+        8,
+        125,
+        200,
+        2
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bounty",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  111,
+                  117,
+                  110,
+                  116,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "creator"
+              },
+              {
+                "kind": "arg",
+                "path": "bounty_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "bounty_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "scorer",
+          "type": "pubkey"
+        },
+        {
+          "name": "github_issue_url",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "resolve_bounty",
+      "discriminator": [
+        207,
+        43,
+        93,
+        238,
+        222,
+        184,
+        79,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "creator",
+          "signer": true
+        },
+        {
+          "name": "bounty",
+          "writable": true
+        },
+        {
+          "name": "winning_submission",
+          "writable": true
+        },
+        {
+          "name": "winner",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "set_score",
+      "discriminator": [
+        218,
+        167,
+        25,
+        121,
+        208,
+        190,
+        8,
+        87
+      ],
+      "accounts": [
+        {
+          "name": "scorer",
+          "signer": true
+        },
+        {
+          "name": "bounty"
+        },
+        {
+          "name": "submission",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "score",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "submit_solution",
+      "discriminator": [
+        203,
+        233,
+        157,
+        191,
+        70,
+        37,
+        205,
+        0
+      ],
+      "accounts": [
+        {
+          "name": "solver",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "bounty",
+          "writable": true
+        },
+        {
+          "name": "submission",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  117,
+                  98,
+                  109,
+                  105,
+                  115,
+                  115,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bounty"
+              },
+              {
+                "kind": "account",
+                "path": "bounty.submission_count",
+                "account": "Bounty"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "pr_url",
+          "type": "string"
+        },
+        {
+          "name": "opus_report_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Bounty",
+      "discriminator": [
+        237,
+        16,
+        105,
+        198,
+        19,
+        69,
+        242,
+        234
+      ]
+    },
+    {
+      "name": "Submission",
+      "discriminator": [
+        58,
+        194,
+        159,
+        158,
+        75,
+        102,
+        178,
+        197
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ZeroAmount",
+      "msg": "Bounty amount must be greater than zero"
+    },
+    {
+      "code": 6001,
+      "name": "UrlTooLong",
+      "msg": "URL exceeds maximum length"
+    },
+    {
+      "code": 6002,
+      "name": "BountyNotOpen",
+      "msg": "Bounty is not in the Open state"
+    },
+    {
+      "code": 6003,
+      "name": "UnauthorizedCreator",
+      "msg": "Only the bounty creator can perform this action"
+    },
+    {
+      "code": 6004,
+      "name": "SubmissionMismatch",
+      "msg": "Submission does not belong to this bounty"
+    },
+    {
+      "code": 6005,
+      "name": "ScoreOutOfRange",
+      "msg": "Score must be between 1 and 10"
+    },
+    {
+      "code": 6006,
+      "name": "ScoreAlreadySet",
+      "msg": "Score has already been set on this submission"
+    },
+    {
+      "code": 6007,
+      "name": "UnauthorizedScorer",
+      "msg": "Only the designated scorer can set scores on this bounty"
+    },
+    {
+      "code": 6008,
+      "name": "LamportOverflow",
+      "msg": "Lamport arithmetic overflow"
+    }
+  ],
+  "types": [
+    {
+      "name": "Bounty",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "scorer",
+            "type": "pubkey"
+          },
+          {
+            "name": "bounty_id",
+            "type": "u64"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "BountyState"
+              }
+            }
+          },
+          {
+            "name": "submission_count",
+            "type": "u32"
+          },
+          {
+            "name": "winner",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "github_issue_url",
+            "type": "string"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "BountyState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Resolved"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Submission",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "bounty",
+            "type": "pubkey"
+          },
+          {
+            "name": "solver",
+            "type": "pubkey"
+          },
+          {
+            "name": "submission_index",
+            "type": "u32"
+          },
+          {
+            "name": "pr_url",
+            "type": "string"
+          },
+          {
+            "name": "opus_report_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "score",
+            "type": {
+              "option": "u8"
+            }
+          },
+          {
+            "name": "state",
+            "type": {
+              "defined": {
+                "name": "SubmissionState"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SubmissionState",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pending"
+          },
+          {
+            "name": "Scored"
+          },
+          {
+            "name": "Winner"
+          }
+        ]
+      }
+    }
+  ],
+  "constants": [
+    {
+      "name": "BOUNTY_SEED",
+      "type": "bytes",
+      "value": "[98, 111, 117, 110, 116, 121]"
+    },
+    {
+      "name": "SUBMISSION_SEED",
+      "type": "bytes",
+      "value": "[115, 117, 98, 109, 105, 115, 115, 105, 111, 110]"
+    }
+  ]
+}
