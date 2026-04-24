@@ -16,6 +16,8 @@ export interface RelayerConfig {
   scorerKeypair: Keypair;
   stubScore: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  databaseUrl: string | null;
+  chainId: string;
 }
 
 export function loadConfig(): RelayerConfig {
@@ -37,6 +39,17 @@ export function loadConfig(): RelayerConfig {
   }
 
   const logLevel = (process.env.LOG_LEVEL ?? "info") as RelayerConfig["logLevel"];
+  const databaseUrl = process.env.DATABASE_URL?.trim() || null;
+  const chainId = process.env.CHAIN_ID ?? "solana-devnet";
 
-  return { rpcUrl, wsUrl, programId, scorerKeypair, stubScore, logLevel };
+  return {
+    rpcUrl,
+    wsUrl,
+    programId,
+    scorerKeypair,
+    stubScore,
+    logLevel,
+    databaseUrl,
+    chainId,
+  };
 }

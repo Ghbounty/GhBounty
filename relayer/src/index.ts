@@ -2,6 +2,13 @@ import { Connection } from "@solana/web3.js";
 
 import { analyzeSubmission } from "./analyzer.js";
 import { loadConfig } from "./config.js";
+import { createDb, type Db } from "./db/client.js";
+import {
+  insertEvaluation,
+  markScored,
+  seedChain,
+  upsertSubmission,
+} from "./db/ops.js";
 import { log, setLogLevel } from "./logger.js";
 import { createScorerClient } from "./scorer.js";
 import { processBacklog, watchSubmissions, type DecodedSubmission } from "./watcher.js";
@@ -32,6 +39,26 @@ async function runOnce(): Promise<never> {
 
   const client = createScorerClient(connection, cfg.scorerKeypair, cfg.programId);
 
+  let db: Db | null = null;
+  if (cfg.databaseUrl) {
+    db = createDb(cfg.databaseUrl);
+    await seedChain(db, {
+      chainId: cfg.chainId,
+      name: "Solana Devnet",
+      rpcUrl: cfg.rpcUrl,
+      escrowAddress: cfg.programId.toBase58(),
+      explorerUrl: "https://explorer.solana.com",
+      tokenSymbol: "SOL",
+      x402Supported: false,
+    });
+    log.info("db connected, chain seeded", { chainId: cfg.chainId });
+  } else {
+    log.warn("DATABASE_URL not set, running without DB persistence");
+  }
+
+  const hexHash = (bytes: Uint8Array): string =>
+    Buffer.from(bytes).toString("hex");
+
   const handler = async (sub: DecodedSubmission): Promise<void> => {
     log.info("new submission detected", {
       submission: sub.pda.toBase58(),
@@ -39,6 +66,18 @@ async function runOnce(): Promise<never> {
       solver: sub.solver.toBase58(),
       prUrl: sub.prUrl,
     });
+
+    if (db) {
+      await upsertSubmission(db, {
+        chainId: cfg.chainId,
+        issuePda: sub.bounty.toBase58(),
+        submissionPda: sub.pda.toBase58(),
+        solver: sub.solver.toBase58(),
+        submissionIndex: sub.submissionIndex,
+        prUrl: sub.prUrl,
+        opusReportHashHex: hexHash(sub.opusReportHash),
+      });
+    }
 
     const { score } = await analyzeSubmission(
       {
@@ -49,7 +88,18 @@ async function runOnce(): Promise<never> {
       cfg.stubScore,
     );
 
-    await client.setScore(sub.bounty, sub.pda, score);
+    const txHash = await client.setScore(sub.bounty, sub.pda, score);
+
+    if (db) {
+      await markScored(db, sub.pda.toBase58());
+      await insertEvaluation(db, {
+        submissionPda: sub.pda.toBase58(),
+        source: "stub",
+        score,
+        reasoning: "stub evaluator (Opus integration pending)",
+        txHash,
+      });
+    }
   };
 
   await processBacklog(connection, client.getProgram(), handler);
