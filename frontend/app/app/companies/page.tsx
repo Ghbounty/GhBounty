@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Guard } from "@/components/Guard";
 import { Avatar } from "@/components/Avatar";
-import { loadBounties, loadUsers } from "@/lib/store";
+import { loadBounties } from "@/lib/store";
+import { fetchCompanies } from "@/lib/data";
 import type { Company } from "@/lib/types";
 
 export default function CompaniesDirectory() {
@@ -18,6 +19,7 @@ export default function CompaniesDirectory() {
 function Inner() {
   const [tick, setTick] = useState(0);
   const [q, setQ] = useState("");
+  const [companies, setCompanies] = useState<Company[]>([]);
 
   useEffect(() => {
     const h = () => setTick((t) => t + 1);
@@ -25,10 +27,16 @@ function Inner() {
     return () => window.removeEventListener("storage", h);
   }, []);
 
-  const companies = useMemo(
-    () => loadUsers().filter((u): u is Company => u.role === "company"),
-    [tick]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    fetchCompanies().then((c) => {
+      if (!cancelled) setCompanies(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tick]);
+
   const bounties = useMemo(() => loadBounties(), [tick]);
 
   const cards = companies

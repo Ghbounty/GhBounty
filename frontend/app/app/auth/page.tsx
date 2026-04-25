@@ -21,55 +21,73 @@ export default function AuthPage() {
     router.replace(role === "company" ? "/app/company" : "/app/dev");
   }
 
-  function onLogin(e: FormEvent<HTMLFormElement>) {
+  async function onLogin(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    const email = (e.currentTarget.elements.namedItem("email") as HTMLInputElement)
-      .value.trim();
+    const f = e.currentTarget;
+    const email = (f.elements.namedItem("email") as HTMLInputElement).value.trim();
+    const password = (f.elements.namedItem("password") as HTMLInputElement)?.value ?? "";
     if (!email) {
       setError("Enter your email.");
       return;
     }
-    const u = loginByEmail(email);
-    if (!u) {
-      setError("No account for that email. Try registering.");
-      return;
+    try {
+      const u = await loginByEmail(email, password);
+      if (!u) {
+        setError("Invalid credentials. Try registering.");
+        return;
+      }
+      redirectAfter(u.role);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed.");
     }
-    redirectAfter(u.role);
   }
 
-  function onRegisterCompany(e: FormEvent<HTMLFormElement>) {
+  async function onRegisterCompany(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     const f = e.currentTarget;
     const get = (n: string) =>
-      (f.elements.namedItem(n) as HTMLInputElement | HTMLTextAreaElement).value.trim();
+      (f.elements.namedItem(n) as HTMLInputElement | HTMLTextAreaElement)?.value.trim() ?? "";
     const name = get("name");
     const email = get("email");
+    const password = get("password");
     const description = get("description");
     if (!name || !email || !description) {
       setError("Name, email and description are required.");
       return;
     }
-    registerCompany({
-      name,
-      email,
-      website: get("website") || undefined,
-      industry: get("industry") || undefined,
-      description,
-      avatarUrl: avatar,
-    });
-    redirectAfter("company");
+    try {
+      const result = await registerCompany(
+        {
+          name,
+          email,
+          website: get("website") || undefined,
+          industry: get("industry") || undefined,
+          description,
+          avatarUrl: avatar,
+        },
+        password,
+      );
+      if (!result) {
+        setError("Account created — check your email to confirm before signing in.");
+        return;
+      }
+      redirectAfter("company");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Registration failed.");
+    }
   }
 
-  function onRegisterDev(e: FormEvent<HTMLFormElement>) {
+  async function onRegisterDev(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     const f = e.currentTarget;
     const get = (n: string) =>
-      (f.elements.namedItem(n) as HTMLInputElement | HTMLTextAreaElement).value.trim();
+      (f.elements.namedItem(n) as HTMLInputElement | HTMLTextAreaElement)?.value.trim() ?? "";
     const username = get("username");
     const email = get("email");
+    const password = get("password");
     if (!username || !email) {
       setError("Username and email are required.");
       return;
@@ -78,15 +96,26 @@ export default function AuthPage() {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    registerDev({
-      username,
-      email,
-      bio: get("bio") || undefined,
-      github: get("github") || undefined,
-      skills,
-      avatarUrl: avatar,
-    });
-    redirectAfter("dev");
+    try {
+      const result = await registerDev(
+        {
+          username,
+          email,
+          bio: get("bio") || undefined,
+          github: get("github") || undefined,
+          skills,
+          avatarUrl: avatar,
+        },
+        password,
+      );
+      if (!result) {
+        setError("Account created — check your email to confirm before signing in.");
+        return;
+      }
+      redirectAfter("dev");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Registration failed.");
+    }
   }
 
   return (
@@ -188,9 +217,19 @@ export default function AuthPage() {
                 required
               />
             </label>
+            <label className="field">
+              <span className="field-label">Password</span>
+              <input
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                autoComplete="current-password"
+                minLength={6}
+              />
+            </label>
             <p className="auth-hint">
-              Demo: try <code>dev@ghbounty.xyz</code> or{" "}
-              <code>builders@avalabs.org</code>.
+              Demo (mock mode): try <code>dev@ghbounty.xyz</code> or{" "}
+              <code>builders@avalabs.org</code>. Password ignored in mock.
             </p>
             <button className="btn btn-primary auth-submit" type="submit">
               Log in
@@ -219,6 +258,17 @@ export default function AuthPage() {
                 />
               </label>
             </div>
+            <label className="field">
+              <span className="field-label">Password *</span>
+              <input
+                name="password"
+                type="password"
+                placeholder="At least 6 characters"
+                autoComplete="new-password"
+                minLength={6}
+                required
+              />
+            </label>
             <div className="field-row">
               <label className="field">
                 <span className="field-label">Website</span>
@@ -269,6 +319,17 @@ export default function AuthPage() {
                 />
               </label>
             </div>
+            <label className="field">
+              <span className="field-label">Password *</span>
+              <input
+                name="password"
+                type="password"
+                placeholder="At least 6 characters"
+                autoComplete="new-password"
+                minLength={6}
+                required
+              />
+            </label>
             <div className="field-row">
               <label className="field">
                 <span className="field-label">GitHub handle</span>

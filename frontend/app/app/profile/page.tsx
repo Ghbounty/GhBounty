@@ -54,12 +54,12 @@ function CompanyProfile() {
     .filter((b) => b.status === "paid")
     .reduce((s, b) => s + b.amountUsdc, 0);
 
-  function onSave(e: FormEvent<HTMLFormElement>) {
+  async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = e.currentTarget;
     const get = (n: string) =>
       (f.elements.namedItem(n) as HTMLInputElement | HTMLTextAreaElement).value.trim();
-    updateUser({
+    await updateUser({
       name: get("name") || c.name,
       email: get("email") || c.email,
       website: get("website") || undefined,
@@ -215,7 +215,7 @@ function DevProfile() {
       return b ? sum + b.amountUsdc : sum;
     }, 0);
 
-  function onSave(e: FormEvent<HTMLFormElement>) {
+  async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = e.currentTarget;
     const get = (n: string) =>
@@ -224,7 +224,7 @@ function DevProfile() {
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    updateUser({
+    await updateUser({
       username: get("username") || d.username,
       email: get("email") || d.email,
       github: get("github") || undefined,

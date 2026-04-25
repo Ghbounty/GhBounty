@@ -1,126 +1,13 @@
 "use client";
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
 import type { ReactNode } from "react";
-import type { Company, Dev, User } from "./types";
-import {
-  ensureSeeded,
-  findUserByEmail,
-  getCurrentUser,
-  setSession,
-  uid,
-  upsertUser,
-} from "./store";
+import { AuthProvider as MockProvider } from "./auth-mock";
+import { AuthProvider as SupabaseProvider } from "./auth-supabase";
+import { useSupabaseBackend } from "./auth-context";
 
-type AuthContextValue = {
-  user: User | null;
-  ready: boolean;
-  loginByEmail: (email: string) => User | null;
-  registerCompany: (
-    data: Omit<Company, "id" | "role" | "createdAt">
-  ) => Company;
-  registerDev: (data: Omit<Dev, "id" | "role" | "createdAt">) => Dev;
-  updateUser: (patch: Partial<User>) => void;
-  logout: () => void;
-  refresh: () => void;
-};
-
-const AuthCtx = createContext<AuthContextValue | null>(null);
+export { useAuth } from "./auth-context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [ready, setReady] = useState(false);
-
-  const refresh = useCallback(() => {
-    setUser(getCurrentUser());
-  }, []);
-
-  useEffect(() => {
-    ensureSeeded();
-    setUser(getCurrentUser());
-    setReady(true);
-  }, []);
-
-  const loginByEmail = useCallback((email: string) => {
-    const found = findUserByEmail(email);
-    if (!found) return null;
-    setSession(found.id);
-    setUser(found);
-    return found;
-  }, []);
-
-  const registerCompany = useCallback(
-    (data: Omit<Company, "id" | "role" | "createdAt">) => {
-      const c: Company = {
-        ...data,
-        id: uid("c"),
-        role: "company",
-        createdAt: Date.now(),
-      };
-      upsertUser(c);
-      setSession(c.id);
-      setUser(c);
-      return c;
-    },
-    []
-  );
-
-  const registerDev = useCallback(
-    (data: Omit<Dev, "id" | "role" | "createdAt">) => {
-      const d: Dev = {
-        ...data,
-        id: uid("d"),
-        role: "dev",
-        createdAt: Date.now(),
-      };
-      upsertUser(d);
-      setSession(d.id);
-      setUser(d);
-      return d;
-    },
-    []
-  );
-
-  const logout = useCallback(() => {
-    setSession(null);
-    setUser(null);
-  }, []);
-
-  const updateUser = useCallback((patch: Partial<User>) => {
-    setUser((current) => {
-      if (!current) return current;
-      const next = { ...current, ...patch } as User;
-      upsertUser(next);
-      return next;
-    });
-  }, []);
-
-  return (
-    <AuthCtx.Provider
-      value={{
-        user,
-        ready,
-        loginByEmail,
-        registerCompany,
-        registerDev,
-        updateUser,
-        logout,
-        refresh,
-      }}
-    >
-      {children}
-    </AuthCtx.Provider>
-  );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthCtx);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
+  const Provider = useSupabaseBackend ? SupabaseProvider : MockProvider;
+  return <Provider>{children}</Provider>;
 }

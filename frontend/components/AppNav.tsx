@@ -101,8 +101,8 @@ export function AppNav() {
           </Link>
           <button
             className="appnav-logout"
-            onClick={() => {
-              logout();
+            onClick={async () => {
+              await logout();
               router.push("/app/auth");
             }}
           >

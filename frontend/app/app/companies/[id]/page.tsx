@@ -7,7 +7,8 @@ import { Avatar } from "@/components/Avatar";
 import { BountyRow } from "@/components/BountyRow";
 import { SubmitPRModal } from "@/components/SubmitPRModal";
 import { useAuth } from "@/lib/auth";
-import { bountiesByCompany, hasDevSubmitted, loadUsers } from "@/lib/store";
+import { bountiesByCompany, hasDevSubmitted } from "@/lib/store";
+import { fetchCompany } from "@/lib/data";
 import type { Bounty, Company } from "@/lib/types";
 
 export default function CompanyDetailPage({
@@ -34,12 +35,30 @@ function Inner({ id }: { id: string }) {
     return () => window.removeEventListener("storage", h);
   }, []);
 
-  const company = useMemo<Company | undefined>(
-    () =>
-      loadUsers().find((u): u is Company => u.role === "company" && u.id === id),
-    [id, tick]
-  );
+  const [company, setCompany] = useState<Company | undefined>(undefined);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCompany(id).then((c) => {
+      if (cancelled) return;
+      setCompany(c ?? undefined);
+      setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, tick]);
+
   const bounties = useMemo(() => bountiesByCompany(id), [id, tick]);
+
+  if (!loaded) {
+    return (
+      <div className="app-loading">
+        <span className="loading-dot" />
+      </div>
+    );
+  }
 
   if (!company) {
     return (
