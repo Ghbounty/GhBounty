@@ -1,11 +1,11 @@
 import { sql } from "drizzle-orm";
-import type { Db } from "./client.js";
 import {
   chainRegistry,
   evaluations,
   issues,
   submissions,
-} from "./schema.js";
+  type Db,
+} from "@ghbounty/db";
 
 export interface ChainSeed {
   chainId: string;

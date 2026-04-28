@@ -13,6 +13,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "db:push": "pnpm --filter @ghbounty/db db:push",
-    "db:generate": "pnpm --filter @ghbounty/db db:generate"
+    "db:generate": "pnpm --filter @ghbounty/db db:generate",
+    "db:migrate": "pnpm --filter @ghbounty/db db:migrate",
+    "db:studio": "pnpm --filter @ghbounty/db db:studio"
   }
 }

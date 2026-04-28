@@ -2,7 +2,7 @@ import { Connection } from "@solana/web3.js";
 
 import { analyzeSubmission } from "./analyzer.js";
 import { loadConfig } from "./config.js";
-import { createDb, type Db } from "./db/client.js";
+import { createDb, type Db } from "@ghbounty/db";
 import {
   insertEvaluation,
   markScored,
@@ -44,7 +44,7 @@ async function runOnce(): Promise<never> {
 
   let db: Db | null = null;
   if (cfg.databaseUrl) {
-    db = createDb(cfg.databaseUrl);
+    db = createDb({ url: cfg.databaseUrl });
     await seedChain(db, {
       chainId: cfg.chainId,
       name: "Solana Devnet",
