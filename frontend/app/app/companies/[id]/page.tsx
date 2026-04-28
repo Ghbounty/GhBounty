@@ -1,14 +1,17 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { Guard } from "@/components/Guard";
 import { Avatar } from "@/components/Avatar";
 import { BountyRow } from "@/components/BountyRow";
 import { SubmitPRModal } from "@/components/SubmitPRModal";
 import { useAuth } from "@/lib/auth";
-import { bountiesByCompany, hasDevSubmitted } from "@/lib/store";
-import { fetchCompany } from "@/lib/data";
+import {
+  fetchBountiesByCompany,
+  fetchCompany,
+  fetchSubmissionsByDev,
+} from "@/lib/data";
 import type { Bounty, Company } from "@/lib/types";
 
 export default function CompanyDetailPage({
@@ -36,21 +39,31 @@ function Inner({ id }: { id: string }) {
   }, []);
 
   const [company, setCompany] = useState<Company | undefined>(undefined);
+  const [bounties, setBounties] = useState<Bounty[]>([]);
+  const [submittedBountyIds, setSubmittedBountyIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetchCompany(id).then((c) => {
+    Promise.all([
+      fetchCompany(id),
+      fetchBountiesByCompany(id),
+      // We resolve dev's submissions once (cheap, scoped to current user)
+      // and use the set to render the "PR submitted" pill per bounty.
+      user ? fetchSubmissionsByDev(user.id) : Promise.resolve([]),
+    ]).then(([c, bs, subs]) => {
       if (cancelled) return;
       setCompany(c ?? undefined);
+      setBounties(bs);
+      setSubmittedBountyIds(new Set(subs.map((s) => s.bountyId)));
       setLoaded(true);
     });
     return () => {
       cancelled = true;
     };
-  }, [id, tick]);
-
-  const bounties = useMemo(() => bountiesByCompany(id), [id, tick]);
+  }, [id, tick, user]);
 
   if (!loaded) {
     return (
@@ -138,7 +151,7 @@ function Inner({ id }: { id: string }) {
       ) : (
         <div className="bounty-stack">
           {bounties.map((b) => {
-            const submitted = user ? hasDevSubmitted(user.id, b.id) : false;
+            const submitted = submittedBountyIds.has(b.id);
             return (
               <BountyRow
                 key={b.id}

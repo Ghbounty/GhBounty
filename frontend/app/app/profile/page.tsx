@@ -9,11 +9,11 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { UsdcIcon } from "@/components/UsdcIcon";
 import { useAuth } from "@/lib/auth";
 import {
-  bountiesByCompany,
-  loadBounties,
-  loadUsers,
-  submissionsByDev,
-} from "@/lib/store";
+  fetchBounties,
+  fetchBountiesByCompany,
+  fetchCompanies,
+  fetchSubmissionsByDev,
+} from "@/lib/data";
 import type { Bounty, Company, Dev, Submission, SubmissionStatus } from "@/lib/types";
 
 export default function ProfilePage() {
@@ -48,7 +48,16 @@ function CompanyProfile() {
     return () => window.removeEventListener("storage", h);
   }, []);
 
-  const bounties = useMemo(() => bountiesByCompany(c.id), [c.id, tick]);
+  const [bounties, setBounties] = useState<Bounty[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchBountiesByCompany(c.id).then((bs) => {
+      if (!cancelled) setBounties(bs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [c.id, tick]);
   const funded = bounties.reduce((s, b) => s + b.amountUsdc, 0);
   const paid = bounties
     .filter((b) => b.status === "paid")
@@ -194,19 +203,37 @@ function DevProfile() {
     return () => window.removeEventListener("storage", h);
   }, []);
 
-  const submissions = useMemo(() => submissionsByDev(d.id), [d.id, tick]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [bountiesAll, setBountiesAll] = useState<Bounty[]>([]);
+  const [companiesAll, setCompaniesAll] = useState<Company[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetchSubmissionsByDev(d.id),
+      fetchBounties(),
+      fetchCompanies(),
+    ]).then(([subs, bs, cs]) => {
+      if (cancelled) return;
+      setSubmissions(subs);
+      setBountiesAll(bs);
+      setCompaniesAll(cs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [d.id, tick]);
+
   const bountiesById = useMemo(() => {
     const m = new Map<string, Bounty>();
-    for (const b of loadBounties()) m.set(b.id, b);
+    for (const b of bountiesAll) m.set(b.id, b);
     return m;
-  }, [tick]);
+  }, [bountiesAll]);
   const companiesById = useMemo(() => {
     const m = new Map<string, Company>();
-    for (const u of loadUsers()) {
-      if (u.role === "company") m.set(u.id, u);
-    }
+    for (const c of companiesAll) m.set(c.id, c);
     return m;
-  }, [tick]);
+  }, [companiesAll]);
 
   const totalEarned = submissions
     .filter((s) => s.status === "accepted")

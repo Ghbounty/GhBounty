@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Guard } from "@/components/Guard";
 import { Avatar } from "@/components/Avatar";
-import { loadBounties } from "@/lib/store";
-import { fetchCompanies } from "@/lib/data";
-import type { Company } from "@/lib/types";
+import { fetchBounties, fetchCompanies } from "@/lib/data";
+import type { Bounty, Company } from "@/lib/types";
 
 export default function CompaniesDirectory() {
   return (
@@ -20,8 +19,12 @@ function Inner() {
   const [tick, setTick] = useState(0);
   const [q, setQ] = useState("");
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [bounties, setBounties] = useState<Bounty[]>([]);
 
   useEffect(() => {
+    // Mock backend syncs cross-tab via localStorage events; the Supabase
+    // backend won't fire these so the listener is a no-op there. Cheap
+    // enough to keep for parity until we wire realtime subscriptions.
     const h = () => setTick((t) => t + 1);
     window.addEventListener("storage", h);
     return () => window.removeEventListener("storage", h);
@@ -29,15 +32,15 @@ function Inner() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchCompanies().then((c) => {
-      if (!cancelled) setCompanies(c);
+    Promise.all([fetchCompanies(), fetchBounties()]).then(([c, b]) => {
+      if (cancelled) return;
+      setCompanies(c);
+      setBounties(b);
     });
     return () => {
       cancelled = true;
     };
   }, [tick]);
-
-  const bounties = useMemo(() => loadBounties(), [tick]);
 
   const cards = companies
     .map((c) => {

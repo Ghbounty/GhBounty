@@ -5,7 +5,7 @@ import { Guard } from "@/components/Guard";
 import { BountyRow } from "@/components/BountyRow";
 import { SubmitPRModal } from "@/components/SubmitPRModal";
 import { useAuth } from "@/lib/auth";
-import { hasDevSubmitted, loadBounties, loadUsers } from "@/lib/store";
+import { fetchMarketplace, fetchSubmissionsByDev } from "@/lib/data";
 import type { Bounty, Company } from "@/lib/types";
 
 type StatusFilter = "all" | "open" | "reviewing" | "approved";
@@ -26,6 +26,11 @@ function DevDashboardInner() {
   const [companyId, setCompanyId] = useState<string>("all");
   const [status, setStatus] = useState<StatusFilter>("open");
   const [modalFor, setModalFor] = useState<Bounty | null>(null);
+  const [bounties, setBounties] = useState<Bounty[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [submittedBountyIds, setSubmittedBountyIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   useEffect(() => {
     const h = () => setTick((t) => t + 1);
@@ -33,17 +38,27 @@ function DevDashboardInner() {
     return () => window.removeEventListener("storage", h);
   }, []);
 
-  const companies = useMemo(
-    () => loadUsers().filter((u): u is Company => u.role === "company"),
-    [tick]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetchMarketplace(),
+      user ? fetchSubmissionsByDev(user.id) : Promise.resolve([]),
+    ]).then(([{ bounties: bs, companies: cs }, subs]) => {
+      if (cancelled) return;
+      setBounties(bs);
+      setCompanies(cs);
+      setSubmittedBountyIds(new Set(subs.map((s) => s.bountyId)));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tick, user]);
+
   const companyMap = useMemo(() => {
     const m = new Map<string, Company>();
     for (const c of companies) m.set(c.id, c);
     return m;
   }, [companies]);
-
-  const bounties = useMemo<Bounty[]>(() => loadBounties(), [tick]);
 
   const filtered = bounties.filter((b) => {
     if (status !== "all" && b.status !== status) return false;
@@ -135,7 +150,7 @@ function DevDashboardInner() {
       ) : (
         <div className="bounty-stack">
           {filtered.map((b) => {
-            const submitted = user ? hasDevSubmitted(user.id, b.id) : false;
+            const submitted = submittedBountyIds.has(b.id);
             return (
               <BountyRow
                 key={b.id}

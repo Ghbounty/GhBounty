@@ -8,7 +8,7 @@ import { BulkBountyFlow } from "@/components/BulkBountyFlow";
 import { CreateBountyForm } from "@/components/CreateBountyForm";
 import { ReleaseModeBadge } from "@/components/ReleaseModePicker";
 import { useAuth } from "@/lib/auth";
-import { bountiesByCompany } from "@/lib/store";
+import { fetchBountiesByCompany } from "@/lib/data";
 import type { Bounty, Company } from "@/lib/types";
 
 type Filter = "all" | "open" | "reviewing" | "approved" | "rejected" | "paid" | "closed";
@@ -29,16 +29,23 @@ function CompanyDashboardInner() {
   const [filter, setFilter] = useState<Filter>("all");
   const [bulkOpen, setBulkOpen] = useState(false);
 
+  const [bounties, setBounties] = useState<Bounty[]>([]);
+
   useEffect(() => {
     const h = () => setTick((t) => t + 1);
     window.addEventListener("storage", h);
     return () => window.removeEventListener("storage", h);
   }, []);
 
-  const bounties = useMemo<Bounty[]>(
-    () => bountiesByCompany(company.id),
-    [company.id, tick]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    fetchBountiesByCompany(company.id).then((bs) => {
+      if (!cancelled) setBounties(bs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [company.id, tick]);
 
   const counts = useMemo(() => {
     const base: Record<Filter, number> = {
