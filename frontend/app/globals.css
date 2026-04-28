@@ -788,6 +788,18 @@ section { position: relative; padding: 120px 40px; }
 }
 
 .auth-form { display: flex; flex-direction: column; gap: 14px; }
+.auth-divider {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+  margin: 6px 0 2px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.auth-divider span { padding: 0 4px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 540px) { .field-row { grid-template-columns: 1fr; } }
 .field { display: flex; flex-direction: column; gap: 6px; }

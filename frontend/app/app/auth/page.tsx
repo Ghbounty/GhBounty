@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { AvatarUploader } from "@/components/AvatarUploader";
+import { PrivyLoginButton, PrivyAvailable } from "@/components/PrivyLoginButton";
 import type { Role } from "@/lib/types";
 
 type Mode = "login" | "register";
@@ -234,6 +235,10 @@ export default function AuthPage() {
             <button className="btn btn-primary auth-submit" type="submit">
               Log in
             </button>
+            <PrivyAvailable>
+              <div className="auth-divider"><span>or</span></div>
+              <PrivyLoginButton role="company" label="Connect wallet" />
+            </PrivyAvailable>
           </form>
         ) : role === "company" ? (
           <form onSubmit={onRegisterCompany} className="auth-form">
@@ -294,6 +299,10 @@ export default function AuthPage() {
             <button className="btn btn-primary auth-submit" type="submit">
               Create company account
             </button>
+            <PrivyAvailable>
+              <div className="auth-divider"><span>or</span></div>
+              <PrivyLoginButton role="company" label="Connect company wallet" />
+            </PrivyAvailable>
           </form>
         ) : (
           <form onSubmit={onRegisterDev} className="auth-form">
@@ -350,6 +359,10 @@ export default function AuthPage() {
             <button className="btn btn-primary auth-submit" type="submit">
               Create developer account
             </button>
+            <PrivyAvailable>
+              <div className="auth-divider"><span>or</span></div>
+              <PrivyLoginButton role="dev" label="Connect dev wallet" />
+            </PrivyAvailable>
           </form>
         )}
       </div>
