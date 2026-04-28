@@ -18,27 +18,30 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import type { Role } from "@/lib/types";
 
-function readRoleHint(): Role {
-  if (typeof window === "undefined") return "company";
+function readRoleHint(): Role | null {
+  if (typeof window === "undefined") return null;
   const r = window.localStorage.getItem("privyRole");
-  return r === "dev" ? "dev" : "company";
+  if (r === "dev") return "dev";
+  if (r === "company") return "company";
+  return null;
 }
 
 export default function OnboardingPage() {
   const { user, ready, registerCompany, registerDev } = useAuth();
-  // Default to "company" on the very first render (works for SSR too).
-  // The mount effect below promotes the hint from localStorage when present.
-  // Either way the role-picker tabs at the top let the user override.
-  const [role, setRole] = useState<Role>("company");
+  // No default. The user must pick a role before any form is rendered.
+  // The hint from PrivyLoginButton (when present) auto-selects on mount;
+  // otherwise the picker is shown until the user clicks one of the cards.
+  const [role, setRole] = useState<Role | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  // Promote the localStorage hint after mount. If absent, we keep the
-  // "company" default and let the user pick via the tabs.
+  // Auto-pick the role when the user came in via PrivyLoginButton (which
+  // wrote the hint to localStorage). Returning sessions that hit
+  // /app/onboarding via the auto-redirect have no hint and see the picker.
   useEffect(() => {
     const hinted = readRoleHint();
-    setRole(hinted);
+    if (hinted) setRole(hinted);
   }, []);
 
   // Returning user with a profile — bounce out.
@@ -135,9 +138,13 @@ export default function OnboardingPage() {
   return (
     <div className="auth-page">
       <div className="auth-card">
-        <h1 className="auth-title">Complete your profile</h1>
+        <h1 className="auth-title">
+          {role === null ? "Choose your role" : "Complete your profile"}
+        </h1>
         <p className="auth-subtitle">
-          Pick how you want to use Ghbounty. You can update these details later.
+          {role === null
+            ? "How do you want to use Ghbounty? You can change this later."
+            : "Fill in a few details — you can update them anytime."}
         </p>
 
         <div className="role-picker">
@@ -177,59 +184,110 @@ export default function OnboardingPage() {
           </button>
         </div>
 
-        {role === "company" ? (
+        {role === null ? null : role === "company" ? (
           <form onSubmit={onSubmitCompany} className="auth-form">
-            <label>
-              <span>Company name *</span>
-              <input name="name" type="text" required disabled={submitting} />
+            <label className="field">
+              <span className="field-label">Company name *</span>
+              <input
+                name="name"
+                type="text"
+                placeholder="Acme Labs"
+                required
+                disabled={submitting}
+              />
             </label>
-            <label>
-              <span>Description *</span>
-              <textarea name="description" rows={3} required disabled={submitting} />
+            <label className="field">
+              <span className="field-label">Description *</span>
+              <textarea
+                name="description"
+                rows={3}
+                placeholder="One-paragraph pitch of what you fund and why."
+                required
+                disabled={submitting}
+              />
             </label>
-            <label>
-              <span>Email (optional)</span>
-              <input name="email" type="email" disabled={submitting} />
-            </label>
-            <label>
-              <span>Website</span>
-              <input name="website" type="url" disabled={submitting} />
-            </label>
-            <label>
-              <span>Industry</span>
-              <input name="industry" type="text" disabled={submitting} />
+            <div className="field-row">
+              <label className="field">
+                <span className="field-label">Email (optional)</span>
+                <input
+                  name="email"
+                  type="email"
+                  placeholder="team@acme.com"
+                  disabled={submitting}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Website</span>
+                <input
+                  name="website"
+                  type="url"
+                  placeholder="https://…"
+                  disabled={submitting}
+                />
+              </label>
+            </div>
+            <label className="field">
+              <span className="field-label">Industry</span>
+              <input
+                name="industry"
+                type="text"
+                placeholder="L1 / Infra, AI…"
+                disabled={submitting}
+              />
             </label>
             {error && <div className="auth-error">{error}</div>}
-            <button type="submit" disabled={submitting}>
+            <button
+              type="submit"
+              className="btn btn-primary auth-submit"
+              disabled={submitting}
+            >
               {submitting ? "Saving…" : "Create company profile"}
             </button>
           </form>
         ) : (
           <form onSubmit={onSubmitDev} className="auth-form">
-            <label>
-              <span>Username *</span>
-              <input
-                name="username"
-                type="text"
-                required
-                pattern="^[a-z0-9][a-z0-9_-]{1,38}$"
+            <div className="field-row">
+              <label className="field">
+                <span className="field-label">Username *</span>
+                <input
+                  name="username"
+                  type="text"
+                  placeholder="opus-builder"
+                  required
+                  pattern="^[a-z0-9][a-z0-9_-]{1,38}$"
+                  disabled={submitting}
+                />
+              </label>
+              <label className="field">
+                <span className="field-label">Email (optional)</span>
+                <input
+                  name="email"
+                  type="email"
+                  placeholder="you@mail.com"
+                  disabled={submitting}
+                />
+              </label>
+            </div>
+            <label className="field">
+              <span className="field-label">Bio</span>
+              <textarea
+                name="bio"
+                rows={3}
+                placeholder="What do you build? What are you looking for?"
                 disabled={submitting}
               />
             </label>
-            <label>
-              <span>Email (optional)</span>
-              <input name="email" type="email" disabled={submitting} />
+            <label className="field">
+              <span className="field-label">GitHub handle</span>
+              <input
+                name="github"
+                type="text"
+                placeholder="opusbuilder"
+                disabled={submitting}
+              />
             </label>
-            <label>
-              <span>Bio</span>
-              <textarea name="bio" rows={3} disabled={submitting} />
-            </label>
-            <label>
-              <span>GitHub handle</span>
-              <input name="github" type="text" disabled={submitting} />
-            </label>
-            <label>
-              <span>Skills (comma-separated)</span>
+            <label className="field">
+              <span className="field-label">Skills (comma-separated)</span>
               <input
                 name="skills"
                 type="text"
@@ -238,7 +296,11 @@ export default function OnboardingPage() {
               />
             </label>
             {error && <div className="auth-error">{error}</div>}
-            <button type="submit" disabled={submitting}>
+            <button
+              type="submit"
+              className="btn btn-primary auth-submit"
+              disabled={submitting}
+            >
               {submitting ? "Saving…" : "Create developer profile"}
             </button>
           </form>
