@@ -16,9 +16,12 @@ export type Database = {
     Tables: {
       profiles: {
         Row: {
+          // GHB-165: Privy DID (e.g. "did:privy:cm0abc...") or stringified
+          // legacy Supabase-Auth UUID. No FK to auth.users anymore.
           user_id: string;
           role: "company" | "dev";
-          email: string;
+          // Optional now that Privy wallet-only logins start with no email.
+          email: string | null;
           onboarding_completed: boolean;
           created_at: string;
           updated_at: string;
@@ -26,7 +29,7 @@ export type Database = {
         Insert: {
           user_id: string;
           role: "company" | "dev";
-          email: string;
+          email?: string | null;
           onboarding_completed?: boolean;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;

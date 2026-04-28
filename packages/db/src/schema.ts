@@ -5,7 +5,6 @@ import {
   integer,
   jsonb,
   pgEnum,
-  pgSchema,
   pgTable,
   smallint,
   text,
@@ -15,13 +14,16 @@ import {
 } from "drizzle-orm/pg-core";
 
 /* ------------------------------------------------------------------ */
-/* Supabase auth schema reference                                       */
+/* Identity model (GHB-165)                                             */
+/*                                                                      */
+/* `profiles.user_id` is a free-form text column holding the user's     */
+/* Privy DID (e.g. "did:privy:cm0abc..."). We do NOT FK to auth.users   */
+/* anymore — Privy users are minted by our bridge route, not by         */
+/* Supabase Auth, so they never appear in `auth.users`.                 */
+/*                                                                      */
+/* Legacy Supabase-auth UUIDs that predate this change still work:      */
+/* migration 0006 cast them to text, and the columns remain unique.     */
 /* ------------------------------------------------------------------ */
-
-const authSchema = pgSchema("auth");
-export const authUsers = authSchema.table("users", {
-  id: uuid("id").primaryKey(),
-});
 
 /* ------------------------------------------------------------------ */
 /* Enums                                                                */
@@ -141,13 +143,16 @@ export const evaluations = pgTable("evaluations", {
  * via a 1:1 FK ("*_meta" tables). The onchain rows stay untouched.
  * ================================================================== */
 
-/* --- Profiles: 1:1 with auth.users, shared by both roles -------- */
+/* --- Profiles: 1:1 with the user's Privy DID (or legacy auth UUID) - */
 export const profiles = pgTable("profiles", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => authUsers.id, { onDelete: "cascade" }),
+  // Privy DID like "did:privy:cm0abc..." or a stringified Supabase auth UUID
+  // for legacy rows. No FK — Privy users live outside auth.users.
+  userId: text("user_id").primaryKey(),
   role: userRoleEnum("role").notNull(),
-  email: text("email").notNull().unique(),
+  // Optional: Privy wallet-only logins start with no email; the user can
+  // fill it in during onboarding. Unique still enforced via the index, so
+  // empty values must remain NULL (never "").
+  email: text("email").unique(),
   onboardingCompleted: boolean("onboarding_completed").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true })
     .default(sql`now()`)
@@ -159,7 +164,7 @@ export const profiles = pgTable("profiles", {
 
 /* --- Companies: populated when profiles.role = 'company' -------- */
 export const companies = pgTable("companies", {
-  userId: uuid("user_id")
+  userId: text("user_id")
     .primaryKey()
     .references(() => profiles.userId, { onDelete: "cascade" }),
   name: text("name").notNull(),
@@ -179,7 +184,7 @@ export const companies = pgTable("companies", {
 
 /* --- Developers: populated when profiles.role = 'dev' ----------- */
 export const developers = pgTable("developers", {
-  userId: uuid("user_id")
+  userId: text("user_id")
     .primaryKey()
     .references(() => profiles.userId, { onDelete: "cascade" }),
   username: text("username").notNull().unique(),
@@ -203,7 +208,7 @@ export const wallets = pgTable(
   "wallets",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
       .references(() => profiles.userId, { onDelete: "cascade" }),
     chainId: text("chain_id")
@@ -233,7 +238,7 @@ export const bountyMeta = pgTable("bounty_meta", {
   // Whether the company explicitly closed it from the UI (vs onchain cancel)
   closedByUser: boolean("closed_by_user").notNull().default(false),
   // Link onchain creator wallet → user profile (when known)
-  createdByUserId: uuid("created_by_user_id").references(
+  createdByUserId: text("created_by_user_id").references(
     () => profiles.userId,
     { onDelete: "set null" },
   ),
@@ -258,7 +263,7 @@ export const submissionMeta = pgTable("submission_meta", {
     .primaryKey()
     .references(() => submissions.id, { onDelete: "cascade" }),
   note: text("note"),
-  submittedByUserId: uuid("submitted_by_user_id").references(
+  submittedByUserId: text("submitted_by_user_id").references(
     () => profiles.userId,
     { onDelete: "set null" },
   ),
