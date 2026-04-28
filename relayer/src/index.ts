@@ -1,17 +1,12 @@
 import { Connection } from "@solana/web3.js";
 
-import { analyzeSubmission } from "./analyzer.js";
 import { loadConfig } from "./config.js";
 import { createDb, type Db } from "@ghbounty/db";
-import {
-  insertEvaluation,
-  markScored,
-  seedChain,
-  upsertSubmission,
-} from "./db/ops.js";
+import { seedChain } from "./db/ops.js";
 import { log, setLogLevel } from "./logger.js";
 import { createScorerClient } from "./scorer.js";
-import { processBacklog, watchSubmissions, type DecodedSubmission } from "./watcher.js";
+import { handleSubmission } from "./submission-handler.js";
+import { processBacklog, watchSubmissions } from "./watcher.js";
 
 const BASE_RETRY_MS = 2_000;
 const MAX_RETRY_MS = 60_000;
@@ -59,57 +54,15 @@ async function runOnce(): Promise<never> {
     log.warn("DATABASE_URL not set, running without DB persistence");
   }
 
-  const hexHash = (bytes: Uint8Array): string =>
-    Buffer.from(bytes).toString("hex");
-
-  const handler = async (sub: DecodedSubmission): Promise<void> => {
-    log.info("new submission detected", {
-      submission: sub.pda.toBase58(),
-      bounty: sub.bounty.toBase58(),
-      solver: sub.solver.toBase58(),
-      prUrl: sub.prUrl,
-    });
-
-    if (db) {
-      await upsertSubmission(db, {
-        chainId: cfg.chainId,
-        issuePda: sub.bounty.toBase58(),
-        submissionPda: sub.pda.toBase58(),
-        solver: sub.solver.toBase58(),
-        submissionIndex: sub.submissionIndex,
-        prUrl: sub.prUrl,
-        opusReportHashHex: hexHash(sub.opusReportHash),
-      });
-    }
-
-    const { score, source, reasoning, report, reportHash } = await analyzeSubmission(
-      {
-        submissionPda: sub.pda.toBase58(),
-        prUrl: sub.prUrl,
-        opusReportHash: sub.opusReportHash,
-      },
-      {
-        stubScore: cfg.stubScore,
-        anthropicApiKey: cfg.anthropicApiKey,
-        anthropicModel: cfg.anthropicModel,
-      },
-    );
-
-    const txHash = await client.setScore(sub.bounty, sub.pda, score);
-
-    if (db) {
-      await markScored(db, sub.pda.toBase58());
-      await insertEvaluation(db, {
-        submissionPda: sub.pda.toBase58(),
-        source,
-        score,
-        reasoning,
-        report,
-        reportHash,
-        txHash,
-      });
-    }
-  };
+  const handler = (sub: Parameters<typeof handleSubmission>[0]) =>
+    handleSubmission(sub, {
+      db,
+      scorer: client,
+      chainId: cfg.chainId,
+      stubScore: cfg.stubScore,
+      anthropicApiKey: cfg.anthropicApiKey,
+      anthropicModel: cfg.anthropicModel,
+    }).then(() => undefined);
 
   await processBacklog(connection, client.getProgram(), handler);
   watchSubmissions(connection, client.getProgram(), handler);

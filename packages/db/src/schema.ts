@@ -37,6 +37,7 @@ export const submissionStateEnum = pgEnum("submission_state", [
   "pending",
   "scored",
   "winner",
+  "auto_rejected",
 ]);
 
 export const evaluationSourceEnum = pgEnum("evaluation_source", [
@@ -95,6 +96,9 @@ export const submissions = pgTable("submissions", {
   opusReportHash: text("opus_report_hash").notNull(),
   txHash: text("tx_hash"),
   state: submissionStateEnum("state").notNull().default("pending"),
+  // GHB-96: 1-based rank within the issue (score desc, ties by created_at asc).
+  // Null until the submission is scored, or for auto_rejected submissions.
+  rank: smallint("rank"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .default(sql`now()`)
     .notNull(),
@@ -233,6 +237,13 @@ export const bountyMeta = pgTable("bounty_meta", {
     () => profiles.userId,
     { onDelete: "set null" },
   ),
+  // GHB-95: submissions scoring < this value are auto-rejected off-chain.
+  // null = no auto-rejection (companies must triage every submission).
+  rejectThreshold: smallint("reject_threshold"),
+  // GHB-98: free-form evaluation criteria injected into the Opus prompt.
+  // null/empty = relayer uses the default ("PR must address all
+  // requirements, code clean and functional.").
+  evaluationCriteria: text("evaluation_criteria"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .default(sql`now()`)
     .notNull(),
