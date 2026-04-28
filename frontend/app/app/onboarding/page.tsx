@@ -26,18 +26,19 @@ function readRoleHint(): Role {
 
 export default function OnboardingPage() {
   const { user, ready, registerCompany, registerDev } = useAuth();
-  // Stays null until the mount effect below runs, so we never render the
-  // wrong form for the first frame. PrivyLoginButton sets `privyRole` in
-  // localStorage during sign-in; this just respects that choice.
-  const [role, setRole] = useState<Role | null>(null);
+  // Default to "company" on the very first render (works for SSR too).
+  // The mount effect below promotes the hint from localStorage when present.
+  // Either way the role-picker tabs at the top let the user override.
+  const [role, setRole] = useState<Role>("company");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  // Hydrate the role hint client-side (avoids SSR/CSR mismatch on
-  // localStorage).
+  // Promote the localStorage hint after mount. If absent, we keep the
+  // "company" default and let the user pick via the tabs.
   useEffect(() => {
-    setRole(readRoleHint());
+    const hinted = readRoleHint();
+    setRole(hinted);
   }, []);
 
   // Returning user with a profile — bounce out.
@@ -123,7 +124,7 @@ export default function OnboardingPage() {
     }
   }
 
-  if (!ready || role === null) {
+  if (!ready) {
     return (
       <div className="app-loading">
         <span className="loading-dot" />
@@ -139,20 +140,40 @@ export default function OnboardingPage() {
           Pick how you want to use Ghbounty. You can update these details later.
         </p>
 
-        <div className="role-tabs">
+        <div className="role-picker">
           <button
             type="button"
-            className={role === "company" ? "role-tab active" : "role-tab"}
+            className={`role-card ${role === "company" ? "selected" : ""}`}
             onClick={() => setRole("company")}
           >
-            Company
+            <div className="role-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 21V7l6-4v18M9 21h12V11l-6-4" />
+                <path d="M13 11h2M13 15h2M13 19h2M5 11h2M5 15h2M5 19h2" />
+              </svg>
+            </div>
+            <div>
+              <div className="role-title">Company</div>
+              <div className="role-desc">Post bounties for your team</div>
+            </div>
+            <span className="role-check" aria-hidden="true" />
           </button>
           <button
             type="button"
-            className={role === "dev" ? "role-tab active" : "role-tab"}
+            className={`role-card ${role === "dev" ? "selected" : ""}`}
             onClick={() => setRole("dev")}
           >
-            Developer
+            <div className="role-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            </div>
+            <div>
+              <div className="role-title">Developer</div>
+              <div className="role-desc">Solve issues, earn bounties</div>
+            </div>
+            <span className="role-check" aria-hidden="true" />
           </button>
         </div>
 
