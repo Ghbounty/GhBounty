@@ -9,6 +9,42 @@ function must(name: string, fallback?: string): string {
   return v;
 }
 
+/**
+ * Load the scorer keypair from one of:
+ *  1. SCORER_KEYPAIR_JSON — the raw JSON array as a string. Cloud-friendly:
+ *     Railway/Fly/etc. let you paste this as a regular env var. Wins if set.
+ *  2. SCORER_KEYPAIR_PATH — file path on disk. Convenient for local dev with
+ *     the Solana CLI's default keypair location.
+ *  3. Default fallback to ~/.config/solana/ghbounty-dev.json.
+ *
+ * Either source must yield a 64-byte secret key array.
+ */
+function loadScorerKeypair(): Keypair {
+  const inlineJson = process.env.SCORER_KEYPAIR_JSON?.trim();
+  if (inlineJson) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(inlineJson);
+    } catch (err) {
+      throw new Error(
+        `SCORER_KEYPAIR_JSON is not valid JSON: ${(err as Error).message}`,
+      );
+    }
+    if (!Array.isArray(parsed) || parsed.some((n) => typeof n !== "number")) {
+      throw new Error(
+        "SCORER_KEYPAIR_JSON must be a JSON array of numbers (64 bytes)",
+      );
+    }
+    return Keypair.fromSecretKey(Uint8Array.from(parsed as number[]));
+  }
+  const keypairPath = must(
+    "SCORER_KEYPAIR_PATH",
+    path.join(os.homedir(), ".config/solana/ghbounty-dev.json"),
+  );
+  const raw = JSON.parse(fs.readFileSync(keypairPath, "utf-8")) as number[];
+  return Keypair.fromSecretKey(Uint8Array.from(raw));
+}
+
 export interface RelayerConfig {
   rpcUrl: string;
   wsUrl: string;
@@ -30,12 +66,7 @@ export function loadConfig(): RelayerConfig {
   const programId = new PublicKey(
     must("PROGRAM_ID", "CPZx26QXs3HjwGobr8cVAZEtF1qGzqnNbBdt7h1EwbBg"),
   );
-  const keypairPath = must(
-    "SCORER_KEYPAIR_PATH",
-    path.join(os.homedir(), ".config/solana/ghbounty-dev.json"),
-  );
-  const raw = JSON.parse(fs.readFileSync(keypairPath, "utf-8")) as number[];
-  const scorerKeypair = Keypair.fromSecretKey(Uint8Array.from(raw));
+  const scorerKeypair = loadScorerKeypair();
 
   const stubScore = Number(process.env.STUB_SCORE ?? "7");
   if (!Number.isInteger(stubScore) || stubScore < 1 || stubScore > 10) {

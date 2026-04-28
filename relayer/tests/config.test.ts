@@ -142,6 +142,58 @@ describe("config", () => {
     }
   });
 
+  test("SCORER_KEYPAIR_JSON: loads keypair from inline JSON env var", () => {
+    const kp = Keypair.generate();
+    const restore = setEnv({
+      SCORER_KEYPAIR_JSON: JSON.stringify(Array.from(kp.secretKey)),
+      SCORER_KEYPAIR_PATH: undefined,
+    });
+    try {
+      const cfg = loadConfig();
+      expect(cfg.scorerKeypair.publicKey.toBase58()).toBe(kp.publicKey.toBase58());
+    } finally {
+      restore();
+    }
+  });
+
+  test("SCORER_KEYPAIR_JSON: takes precedence over PATH when both set", () => {
+    const kp = Keypair.generate();
+    const restore = setEnv({
+      SCORER_KEYPAIR_JSON: JSON.stringify(Array.from(kp.secretKey)),
+      SCORER_KEYPAIR_PATH: "/nonexistent/should-not-be-read.json",
+    });
+    try {
+      const cfg = loadConfig();
+      expect(cfg.scorerKeypair.publicKey.toBase58()).toBe(kp.publicKey.toBase58());
+    } finally {
+      restore();
+    }
+  });
+
+  test("SCORER_KEYPAIR_JSON: rejects non-array payload", () => {
+    const restore = setEnv({
+      SCORER_KEYPAIR_JSON: '{"not": "an array"}',
+      SCORER_KEYPAIR_PATH: undefined,
+    });
+    try {
+      expect(() => loadConfig()).toThrow(/array of numbers/);
+    } finally {
+      restore();
+    }
+  });
+
+  test("SCORER_KEYPAIR_JSON: rejects malformed JSON", () => {
+    const restore = setEnv({
+      SCORER_KEYPAIR_JSON: "[1,2,3,",
+      SCORER_KEYPAIR_PATH: undefined,
+    });
+    try {
+      expect(() => loadConfig()).toThrow(/not valid JSON/);
+    } finally {
+      restore();
+    }
+  });
+
   test("anthropic config: defaults to disabled with sonnet model", () => {
     const restore = setEnv({
       SCORER_KEYPAIR_PATH: TMP_KEYPAIR,
