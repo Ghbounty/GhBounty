@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+# Runs before every commit. Fails fast on:
+#  - typecheck across all workspaces (~3s)
+#  - tests across all workspaces (~1s)
+# Bypass with `git commit --no-verify` only when you know what you're doing.
+
+set -e
+echo "→ pnpm typecheck"
+pnpm typecheck
+echo "→ pnpm test"
+pnpm test

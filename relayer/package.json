@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -18,13 +18,13 @@
     "@ghbounty/diff-filter": "workspace:^",
     "@solana/web3.js": "^1.95.0",
     "bn.js": "^5.2.1",
-    "drizzle-orm": "^0.45.2"
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/bn.js": "^5.1.0",
     "@types/node": "^22.0.0",
-    "dotenv": "^17.4.2",
-    "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }
