@@ -28,7 +28,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # genlayer-test imports `Buffer` from collections.abc, which is 3.12+ only
+          # (PEP 688). Pinning to 3.12 keeps CI green.
+          python-version: "3.12"
       - run: pip install ruff pytest genlayer-test
       - run: ruff check bounty_judge/contracts
       - run: pytest bounty_judge/tests
