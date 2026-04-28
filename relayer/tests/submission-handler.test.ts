@@ -11,15 +11,16 @@ import { handleSubmission } from "../src/submission-handler.js";
  * `db/ops` functions are exercised against a Drizzle-shaped fake.
  *
  * Drizzle calls supported by the proxy:
- *   threshold lookup  : select(...).from(bountyMeta).innerJoin(...).where(...).limit(1)
+ *   threshold lookup  : select({threshold:...}).from(bountyMeta).innerJoin(...).where(...).limit(1)
+ *   criteria lookup   : select({criteria:...}).from(bountyMeta).innerJoin(...).where(...).limit(1)
  *   ranking fetch     : select(...).from(submissions).leftJoin(...).where(...)
  *   submission upsert : insert(submissions).values(...).onConflictDoNothing()
  *   evaluation insert : insert(evaluations).values(...) (awaited directly)
  *   state mark        : update(submissions).set(...).where(...)
  *   rank apply        : update(submissions).set({rank}).where(...)
  *
- * `state.thresholdToReturn` and `state.rankingRowsToReturn` let each test
- * stage what those two SELECTs resolve to.
+ * Threshold and criteria lookups share the same chain shape; we dispatch on
+ * the select-arg key (`threshold` vs `criteria`).
  */
 
 type Recorded = { kind: string; payload: unknown };
@@ -34,16 +35,19 @@ interface RankingRow {
 interface FakeDb {
   calls: Recorded[];
   thresholdToReturn: number | null;
+  criteriaToReturn: string | null;
   rankingRowsToReturn: RankingRow[];
 }
 
 function fakeDb(opts: {
   threshold?: number | null;
+  criteria?: string | null;
   rankingRows?: RankingRow[];
 } = {}): FakeDb {
   return {
     calls: [],
     thresholdToReturn: opts.threshold ?? null,
+    criteriaToReturn: opts.criteria ?? null,
     rankingRowsToReturn: opts.rankingRows ?? [],
   };
 }
@@ -82,20 +86,32 @@ function buildDrizzleProxy(state: FakeDb): unknown {
     }),
   });
 
-  // Two distinct select chains identified by which join is called:
-  //   innerJoin → threshold lookup, terminates at .where().limit()
-  //   leftJoin  → ranking fetch, terminates at .where() (thenable)
-  const selectChain = () => ({
+  // Threshold and criteria selects share the same chain shape, distinguished
+  // by which key the caller put in the `select({ ... })` map. Ranking is the
+  // only leftJoin-shaped query.
+  const selectChain = (selectArg: Record<string, unknown>) => ({
     from: () => ({
       innerJoin: () => ({
         where: () => ({
           limit: () => {
-            state.calls.push({ kind: "select", payload: "threshold-lookup" });
-            return Promise.resolve(
-              state.thresholdToReturn == null
-                ? []
-                : [{ threshold: state.thresholdToReturn }],
-            );
+            if ("threshold" in selectArg) {
+              state.calls.push({ kind: "select", payload: "threshold-lookup" });
+              return Promise.resolve(
+                state.thresholdToReturn == null
+                  ? []
+                  : [{ threshold: state.thresholdToReturn }],
+              );
+            }
+            if ("criteria" in selectArg) {
+              state.calls.push({ kind: "select", payload: "criteria-lookup" });
+              return Promise.resolve(
+                state.criteriaToReturn == null
+                  ? []
+                  : [{ criteria: state.criteriaToReturn }],
+              );
+            }
+            state.calls.push({ kind: "select", payload: "unknown-lookup" });
+            return Promise.resolve([]);
           },
         }),
       }),
@@ -442,7 +458,7 @@ describe("handleSubmission", () => {
     expect(rankPatch).toEqual({ rank: null });
   });
 
-  test("ranking-fetch SELECT runs after evaluation insert", async () => {
+  test("SELECT order: criteria → threshold → ranking-fetch", async () => {
     const state = fakeDb({});
     const db = buildDrizzleProxy(state);
     const { client } = buildScorer();
@@ -455,9 +471,11 @@ describe("handleSubmission", () => {
       analyze,
     });
 
-    // The two SELECTs in order: threshold-lookup then ranking-fetch.
+    // criteria-lookup runs before analyze, threshold-lookup after setScore,
+    // ranking-fetch after the evaluation insert.
     const selects = state.calls.filter((c) => c.kind === "select");
     expect(selects.map((s) => s.payload)).toEqual([
+      "criteria-lookup",
       "threshold-lookup",
       "ranking-fetch",
     ]);
@@ -475,5 +493,59 @@ describe("handleSubmission", () => {
       analyze,
     });
     expect(r.outcome).toBe("pass");
+  });
+
+  /* GHB-98: criteria integration --------------------------------- */
+
+  test("fetches evaluation_criteria from DB and passes it to the analyzer", async () => {
+    const state = fakeDb({ criteria: "must include integration tests" });
+    const db = buildDrizzleProxy(state);
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    expect(analyze).toHaveBeenCalledOnce();
+    const analyzeArgs = analyze.mock.calls[0]![0];
+    expect(analyzeArgs.evaluationCriteria).toBe(
+      "must include integration tests",
+    );
+  });
+
+  test("passes null criteria when none configured (analyzer falls back to default)", async () => {
+    const state = fakeDb({}); // criteria left at null
+    const db = buildDrizzleProxy(state);
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    const analyzeArgs = analyze.mock.calls[0]![0];
+    expect(analyzeArgs.evaluationCriteria).toBeNull();
+  });
+
+  test("no DB: criteria stays null (default rubric used by analyzer)", async () => {
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: client,
+      analyze,
+    });
+
+    const analyzeArgs = analyze.mock.calls[0]![0];
+    expect(analyzeArgs.evaluationCriteria).toBeNull();
   });
 });

@@ -7,6 +7,11 @@ export interface AnalyzeInput {
   submissionPda: string;
   prUrl: string;
   opusReportHash: Uint8Array;
+  /**
+   * GHB-98: company-defined evaluation criteria from `bounty_meta.evaluation_criteria`.
+   * Null/empty = relayer falls back to the default rubric.
+   */
+  evaluationCriteria?: string | null;
 }
 
 export interface AnalyzeResult {
@@ -63,7 +68,10 @@ export async function analyzeSubmission(
 
   try {
     const result = await scorePR(
-      { prUrl: input.prUrl },
+      {
+        prUrl: input.prUrl,
+        evaluationCriteria: input.evaluationCriteria ?? null,
+      },
       {
         apiKey: opts.anthropicApiKey,
         model: opts.anthropicModel,

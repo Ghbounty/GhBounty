@@ -240,6 +240,10 @@ export const bountyMeta = pgTable("bounty_meta", {
   // GHB-95: submissions scoring < this value are auto-rejected off-chain.
   // null = no auto-rejection (companies must triage every submission).
   rejectThreshold: smallint("reject_threshold"),
+  // GHB-98: free-form evaluation criteria injected into the Opus prompt.
+  // null/empty = relayer uses the default ("PR must address all
+  // requirements, code clean and functional.").
+  evaluationCriteria: text("evaluation_criteria"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .default(sql`now()`)
     .notNull(),

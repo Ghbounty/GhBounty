@@ -130,6 +130,27 @@ export async function getRejectThreshold(
   return first.threshold ?? null;
 }
 
+/**
+ * GHB-98: look up the per-issue evaluation criteria.
+ *
+ * Same join shape as `getRejectThreshold`. Null/empty result lets the
+ * caller fall back to the default rubric in `sanitizeCriteria`.
+ */
+export async function getEvaluationCriteria(
+  db: Db,
+  issuePda: string,
+): Promise<string | null> {
+  const rows = await db
+    .select({ criteria: bountyMeta.evaluationCriteria })
+    .from(bountyMeta)
+    .innerJoin(issues, sql`${issues.id} = ${bountyMeta.issueId}`)
+    .where(sql`${issues.pda} = ${issuePda}`)
+    .limit(1);
+  const first = rows[0];
+  if (!first) return null;
+  return first.criteria ?? null;
+}
+
 /* ---------------------------------------------------------------- */
 /* GHB-96: ranking                                                    */
 /* ---------------------------------------------------------------- */

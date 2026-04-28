@@ -2,6 +2,7 @@ import { type Db } from "@ghbounty/db";
 
 import { analyzeSubmission, type AnalyzeResult } from "./analyzer.js";
 import {
+  getEvaluationCriteria,
   getRejectThreshold,
   insertEvaluation,
   markAutoRejected,
@@ -77,12 +78,20 @@ export async function handleSubmission(
     });
   }
 
+  // GHB-98: pull company-defined evaluation criteria before analyzing so the
+  // Opus prompt incorporates it. Falls back to the default rubric inside the
+  // analyzer when null/empty.
+  const criteria = deps.db
+    ? await getEvaluationCriteria(deps.db, sub.bounty.toBase58())
+    : null;
+
   const analyze = deps.analyze ?? analyzeSubmission;
   const { score, source, reasoning, report, reportHash } = await analyze(
     {
       submissionPda: sub.pda.toBase58(),
       prUrl: sub.prUrl,
       opusReportHash: sub.opusReportHash,
+      evaluationCriteria: criteria,
     },
     {
       stubScore: deps.stubScore,
