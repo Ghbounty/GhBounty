@@ -11,6 +11,13 @@ export type AuthContextValue = {
   // to /app/onboarding instead of /app/auth. Other auth backends leave it
   // `false`.
   pendingOnboarding?: boolean;
+  // Surface for errors from the post-auth persist effect. The signup forms
+  // submit + open Privy and then await the user redirect; if the persist
+  // fails (constraint violation, RLS reject, network), the page has no
+  // way to know what happened. We expose the message here so the form
+  // can render it instead of staying stuck on "Waiting for wallet…".
+  pendingError?: string | null;
+  clearPendingError?: () => void;
   loginByEmail: (email: string, password?: string) => Promise<User | null>;
   registerCompany: (
     data: Omit<Company, "id" | "role" | "createdAt">,

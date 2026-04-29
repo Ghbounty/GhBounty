@@ -787,6 +787,44 @@ section { position: relative; padding: 120px 40px; }
   box-shadow: 0 0 8px var(--accent);
 }
 
+/* Stacked picker (login/signup, enterprise/dev) — replaces side-by-side
+   role cards on the entry pickers. Two big, full-width tappable rows. */
+.auth-stack { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 14px; }
+.auth-stack-item {
+  position: relative;
+  display: grid; grid-template-columns: auto 1fr auto;
+  align-items: center; gap: 14px;
+  padding: 18px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.01);
+  text-decoration: none;
+  color: var(--text);
+  transition: border-color .2s, background .2s, transform .15s;
+}
+.auth-stack-item:hover {
+  border-color: var(--accent);
+  background: rgba(0,229,209,0.04);
+  transform: translateY(-1px);
+}
+.auth-stack-icon {
+  width: 44px; height: 44px; border-radius: 10px;
+  background: rgba(0,229,209,0.1); color: var(--accent);
+  display: grid; place-items: center;
+  border: 1px solid var(--border-strong);
+}
+.auth-stack-body { display: flex; flex-direction: column; gap: 2px; }
+.auth-stack-title { font-weight: 600; font-size: 16px; }
+.auth-stack-desc { font-size: 13px; color: var(--text-dim); }
+.auth-stack-chevron {
+  font-size: 18px; color: var(--text-muted);
+  transition: color .2s, transform .15s;
+}
+.auth-stack-item:hover .auth-stack-chevron { color: var(--accent); transform: translateX(2px); }
+
+.accent-link { color: var(--accent); text-decoration: none; }
+.accent-link:hover { text-decoration: underline; }
+
 .auth-form { display: flex; flex-direction: column; gap: 14px; }
 .auth-divider {
   display: flex; align-items: center; gap: 12px;

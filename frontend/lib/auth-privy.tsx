@@ -57,21 +57,47 @@ function slugify(s: string): string {
     .slice(0, 64);
 }
 
+/**
+ * Persist company rows. Runs in two steps because we have no transactions
+ * across REST calls:
+ *   1. Insert into `profiles` (upsert via `onConflict` to be idempotent —
+ *      a previous failed attempt may have left a row).
+ *   2. Insert into `companies`.
+ *
+ * If step 2 fails AND we just created the profile row in step 1 (i.e. it
+ * didn't exist before), we delete the orphan profile so the next retry
+ * starts clean. We don't delete profiles that pre-existed — they may
+ * belong to a successful prior signup we don't want to nuke.
+ */
 async function persistCompanyRow(
   supabase: DBClient,
   privyId: string,
   data: Omit<Company, "id" | "role" | "createdAt">,
 ): Promise<void> {
-  const { error: profileErr } = await supabase.from("profiles").insert({
-    user_id: privyId,
-    role: "company",
-    email: data.email || null,
-    onboarding_completed: true,
-  });
-  // 23505 = unique_violation: profile already exists, OK to skip and
-  // proceed to inserting/updating the role-specific row.
-  if (profileErr && profileErr.code !== "23505") {
-    throw new Error(`profiles insert: ${profileErr.message}`);
+  const { data: preExisting } = await supabase
+    .from("profiles")
+    .select("user_id, role")
+    .eq("user_id", privyId)
+    .maybeSingle();
+  const profileExisted = preExisting !== null;
+
+  if (preExisting && preExisting.role !== "company") {
+    throw new Error(
+      `This wallet is already registered as a ${preExisting.role}. ` +
+        "Use the matching dashboard or log in with a different wallet.",
+    );
+  }
+
+  if (!profileExisted) {
+    const { error: profileErr } = await supabase.from("profiles").insert({
+      user_id: privyId,
+      role: "company",
+      email: data.email || null,
+      onboarding_completed: true,
+    });
+    if (profileErr) {
+      throw new Error(`profiles insert: ${profileErr.message}`);
+    }
   }
 
   const slug = slugify(data.name) || privyId.slice(-8);
@@ -84,7 +110,14 @@ async function persistCompanyRow(
     industry: data.industry ?? null,
     logo_url: data.avatarUrl ?? null,
   });
-  if (companyErr) throw new Error(`companies insert: ${companyErr.message}`);
+  if (companyErr) {
+    if (!profileExisted) {
+      // Roll back the profile we just created so the user can retry
+      // cleanly without ending up with an orphan row.
+      await supabase.from("profiles").delete().eq("user_id", privyId);
+    }
+    throw new Error(`companies insert: ${companyErr.message}`);
+  }
 }
 
 async function persistDevRow(
@@ -92,14 +125,30 @@ async function persistDevRow(
   privyId: string,
   data: Omit<Dev, "id" | "role" | "createdAt">,
 ): Promise<void> {
-  const { error: profileErr } = await supabase.from("profiles").insert({
-    user_id: privyId,
-    role: "dev",
-    email: data.email || null,
-    onboarding_completed: true,
-  });
-  if (profileErr && profileErr.code !== "23505") {
-    throw new Error(`profiles insert: ${profileErr.message}`);
+  const { data: preExisting } = await supabase
+    .from("profiles")
+    .select("user_id, role")
+    .eq("user_id", privyId)
+    .maybeSingle();
+  const profileExisted = preExisting !== null;
+
+  if (preExisting && preExisting.role !== "dev") {
+    throw new Error(
+      `This wallet is already registered as a ${preExisting.role}. ` +
+        "Use the matching dashboard or log in with a different wallet.",
+    );
+  }
+
+  if (!profileExisted) {
+    const { error: profileErr } = await supabase.from("profiles").insert({
+      user_id: privyId,
+      role: "dev",
+      email: data.email || null,
+      onboarding_completed: true,
+    });
+    if (profileErr) {
+      throw new Error(`profiles insert: ${profileErr.message}`);
+    }
   }
 
   const { error: devErr } = await supabase.from("developers").insert({
@@ -110,7 +159,12 @@ async function persistDevRow(
     skills: data.skills,
     avatar_url: data.avatarUrl ?? null,
   });
-  if (devErr) throw new Error(`developers insert: ${devErr.message}`);
+  if (devErr) {
+    if (!profileExisted) {
+      await supabase.from("profiles").delete().eq("user_id", privyId);
+    }
+    throw new Error(`developers insert: ${devErr.message}`);
+  }
 }
 
 async function loadUser(supabase: DBClient, userId: string): Promise<User | null> {
@@ -180,8 +234,11 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
   const supabase = useMemo<DBClient>(() => createClient(), []);
   const [user, setUser] = useState<User | null>(null);
   const [hydrating, setHydrating] = useState(false);
+  const [pendingError, setPendingError] = useState<string | null>(null);
   const lastUserIdRef = useRef<string | null>(null);
   const pendingRef = useRef<PendingRegistration | null>(null);
+
+  const clearPendingError = useCallback(() => setPendingError(null), []);
 
   // Step 1: register the Privy access-token getter with the Supabase bridge.
   // The supabase client uses `getSupabaseAccessToken()` on every request, so
@@ -231,8 +288,16 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
             await persistDevRow(supabase, privyId, pending.data);
           }
           u = await loadUser(supabase, privyId);
+          if (!cancelled) setPendingError(null);
         } catch (err) {
           console.error("[auth-privy] persist on auth failed:", err);
+          if (!cancelled) {
+            setPendingError(
+              err instanceof Error
+                ? err.message
+                : "Could not save your profile. Please try again.",
+            );
+          }
         } finally {
           pendingRef.current = null;
         }
@@ -274,6 +339,7 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
   //     and finishes the persist + load.
   const registerCompany = useCallback(
     async (data: Omit<Company, "id" | "role" | "createdAt">): Promise<Company | null> => {
+      setPendingError(null);
       if (!privy.authenticated) {
         pendingRef.current = { role: "company", data };
         privy.login();
@@ -291,6 +357,7 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
 
   const registerDev = useCallback(
     async (data: Omit<Dev, "id" | "role" | "createdAt">): Promise<Dev | null> => {
+      setPendingError(null);
       if (!privy.authenticated) {
         pendingRef.current = { role: "dev", data };
         privy.login();
@@ -370,6 +437,8 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
         // for returning users while we hydrate from Supabase.
         ready: privy.ready && !hydrating,
         pendingOnboarding,
+        pendingError,
+        clearPendingError,
         loginByEmail,
         registerCompany,
         registerDev,
