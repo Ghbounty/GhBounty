@@ -755,11 +755,11 @@ function FinalCTA() {
           gatekeepers. No waiting.
         </p>
         <div className="hero-ctas">
-          <a className="btn btn-primary" href="/app/auth">
+          <a className="btn btn-primary" href="/app/auth/signup/company">
             <IconBuilding size={16} />
             Join as a Company
           </a>
-          <a className="btn btn-ghost" href="/app/auth">
+          <a className="btn btn-ghost" href="/app/auth/signup/dev">
             <IconDev size={16} />
             Join as a Dev
           </a>
