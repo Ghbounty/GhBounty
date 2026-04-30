@@ -187,6 +187,7 @@ export async function fetchDeveloper(id: string): Promise<Dev | null> {
 
 type IssueRow = {
   id: string;
+  pda: string;
   github_issue_url: string;
   amount: number | string; // bigint may come over wire as string
   state: "open" | "resolved" | "cancelled";
@@ -202,7 +203,7 @@ type IssueRow = {
 };
 
 const ISSUE_SELECT =
-  "id, github_issue_url, amount, state, submission_count, created_at, bounty_meta(title, description, release_mode, closed_by_user, created_by_user_id)";
+  "id, pda, github_issue_url, amount, state, submission_count, created_at, bounty_meta(title, description, release_mode, closed_by_user, created_by_user_id)";
 
 /** Parse "https://github.com/<owner>/<repo>/issues/<n>" → repo + number. */
 function parseGithubIssueUrl(url: string): { repo: string; issueNumber: number } {
@@ -238,6 +239,7 @@ function rowToBounty(row: IssueRow): Bounty {
     typeof row.amount === "string" ? Number(row.amount) : row.amount;
   return {
     id: row.id,
+    pda: row.pda,
     companyId: meta?.created_by_user_id ?? "",
     repo,
     issueNumber,

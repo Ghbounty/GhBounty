@@ -13,9 +13,15 @@ import type { Company, ReleaseMode } from "@/lib/types";
 export function CreateBountyForm({
   company,
   onCreated,
+  refreshKey = 0,
 }: {
   company: Company;
   onCreated?: () => void;
+  /** Bumped by the parent dashboard whenever something happens that may
+   * have changed the wallet's SOL balance off-band — e.g. a `cancel_bounty`
+   * refund triggered by the `⋯` menu Delete action. Forces the balance
+   * useEffect to re-run without needing a full unmount. */
+  refreshKey?: number;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [flowData, setFlowData] = useState<CreateBountyData | null>(null);
@@ -52,7 +58,7 @@ export function CreateBountyForm({
     return () => {
       cancelled = true;
     };
-  }, [walletAddress]);
+  }, [walletAddress, refreshKey]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();

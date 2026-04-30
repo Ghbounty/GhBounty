@@ -180,3 +180,40 @@ export async function buildCreateBountyIx(
 function generateBountyId(): bigint {
   return BigInt(Date.now());
 }
+
+export type CancelBountyParams = {
+  /** Bounty creator. Must match `bounty.creator` on-chain — the program
+   * enforces it via `UnauthorizedCreator`. */
+  creator: PublicKey;
+  /** PDA of the bounty being cancelled. */
+  bountyPda: PublicKey;
+};
+
+/**
+ * Build the `cancel_bounty` instruction. The program transfers the entire
+ * escrow back to the creator and flips state to Cancelled, so a successful
+ * confirmation here means the funds are back in the creator's wallet.
+ *
+ * Constraints (program-side):
+ *   - bounty.state must be Open
+ *   - signer must equal bounty.creator
+ *
+ * Caller is responsible for:
+ *   1. Wrapping in a Transaction with a fresh blockhash.
+ *   2. Sending via the connected wallet (Privy embedded or external).
+ *   3. Awaiting confirmation and checking `value.err`.
+ *   4. Cleaning up the off-chain row (`deleteIssueAndMeta`).
+ */
+export async function buildCancelBountyIx(
+  params: CancelBountyParams,
+  connection: Connection = getConnection(),
+): Promise<TransactionInstruction> {
+  const program = getProgram(connection);
+  return program.methods
+    .cancelBounty()
+    .accountsStrict({
+      creator: params.creator,
+      bounty: params.bountyPda,
+    })
+    .instruction();
+}

@@ -33,6 +33,10 @@ export type ReleaseMode = "auto" | "assisted";
 
 export type Bounty = {
   id: string;
+  /** On-chain PDA of the escrow account, base58. Optional because mock
+   * data and historical rows may not have it surfaced through `data.ts`.
+   * Required to build the `cancel_bounty` instruction. */
+  pda?: string;
   companyId: string;
   repo: string;
   issueNumber: number;

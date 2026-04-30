@@ -8,6 +8,12 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import bs58 from "bs58";
+import { PublicKey, Transaction } from "@solana/web3.js";
+import {
+  useSignAndSendTransaction,
+  useWallets,
+} from "@privy-io/react-auth/solana";
 import {
   closeBounty as closeBountyMock,
   deleteBounty as deleteBountyMock,
@@ -15,6 +21,7 @@ import {
 } from "@/lib/store";
 import { usePrivyBackend } from "@/lib/auth-context";
 import { closeIssue, deleteIssueAndMeta } from "@/lib/bounties";
+import { buildCancelBountyIx, getConnection } from "@/lib/solana";
 import { createClient } from "@/utils/supabase/client";
 import type { Bounty, ReleaseMode } from "@/lib/types";
 import { ReleaseModePicker } from "./ReleaseModePicker";
@@ -30,9 +37,16 @@ export function BountyEditMenu({
   const [open, setOpen] = useState(false);
   const [modal, setModal] = useState<"edit" | "close" | "delete" | null>(null);
   const [busy, setBusy] = useState(false);
+  // Surface the on-chain phase so the modal button can swap from
+  // "Cancelling on-chain…" → "Removing…" instead of just spinning blankly.
+  const [phase, setPhase] = useState<"idle" | "cancelling" | "removing">(
+    "idle",
+  );
   const [error, setError] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const privyMode = usePrivyBackend;
+  const { wallets } = useWallets();
+  const { signAndSendTransaction } = useSignAndSendTransaction();
 
   useEffect(() => {
     if (!open) return;
@@ -90,16 +104,83 @@ export function BountyEditMenu({
     }
   }, [bounty.id, onChanged, privyMode]);
 
+  // Delete = "cancel & forget":
+  //   1. If the bounty is still Open on-chain, call `cancel_bounty` so the
+  //      escrow returns to the creator's Privy wallet. This is the only way
+  //      to recover the locked SOL — without it, deleting the row leaves the
+  //      lamports stuck in the bounty PDA forever.
+  //   2. Once the cancel is confirmed (or skipped because the bounty is
+  //      already cancelled / resolved / not yet on-chain), remove the
+  //      Supabase rows so the dashboard stops showing it.
+  //
+  // Mock mode (NEXT_PUBLIC_USE_PRIVY off) just hits the localStorage store.
   const onConfirmDelete = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
-      if (privyMode) {
-        const supabase = createClient();
-        await deleteIssueAndMeta(supabase, bounty.id);
-      } else {
+      if (!privyMode) {
         deleteBountyMock(bounty.id);
+        setModal(null);
+        onChanged();
+        return;
       }
+
+      // 1) On-chain cancel — only meaningful if the bounty PDA exists and
+      //    is still Open. Anything else (closed_by_user, resolved on-chain,
+      //    cancelled previously, mock data without pda) skips straight to
+      //    the off-chain cleanup.
+      const canCancelOnChain = !!bounty.pda && bounty.status === "open";
+      if (canCancelOnChain) {
+        const wallet = wallets[0];
+        if (!wallet) {
+          throw new Error(
+            "No Solana wallet connected. Reconnect Privy and try again.",
+          );
+        }
+        setPhase("cancelling");
+        const connection = getConnection();
+        const creator = new PublicKey(wallet.address);
+        const bountyPda = new PublicKey(bounty.pda as string);
+
+        const ix = await buildCancelBountyIx(
+          { creator, bountyPda },
+          connection,
+        );
+        const { blockhash, lastValidBlockHeight } =
+          await connection.getLatestBlockhash("confirmed");
+        const tx = new Transaction({
+          feePayer: creator,
+          recentBlockhash: blockhash,
+        }).add(ix);
+        const serialized = tx.serialize({ requireAllSignatures: false });
+
+        const { signature } = await signAndSendTransaction({
+          transaction: serialized,
+          wallet,
+          chain: "solana:devnet",
+        });
+        const sig = bs58.encode(signature);
+
+        // `confirmTransaction` resolves even when the program reverted —
+        // it stuffs the program error into `value.err`. Without this check
+        // we'd "succeed" when the chain actually rejected the cancel.
+        const conf = await connection.confirmTransaction(
+          { signature: sig, blockhash, lastValidBlockHeight },
+          "confirmed",
+        );
+        if (conf.value.err) {
+          throw new Error(
+            `cancel_bounty reverted on-chain: ${JSON.stringify(conf.value.err)}`,
+          );
+        }
+      }
+
+      // 2) Off-chain cleanup. RLS lets the creator delete their own meta,
+      //    then the orphan-issue policy lets them delete the issue row.
+      setPhase("removing");
+      const supabase = createClient();
+      await deleteIssueAndMeta(supabase, bounty.id);
+
       setModal(null);
       onChanged();
     } catch (err) {
@@ -107,8 +188,17 @@ export function BountyEditMenu({
       setError(err instanceof Error ? err.message : "Delete failed.");
     } finally {
       setBusy(false);
+      setPhase("idle");
     }
-  }, [bounty.id, onChanged, privyMode]);
+  }, [
+    bounty.id,
+    bounty.pda,
+    bounty.status,
+    onChanged,
+    privyMode,
+    signAndSendTransaction,
+    wallets,
+  ]);
 
   return (
     <>
@@ -214,14 +304,31 @@ export function BountyEditMenu({
         <ConfirmModal
           title="Delete this bounty?"
           body={
-            <>
-              This permanently removes <code>{bounty.repo} #{bounty.issueNumber}</code>{" "}
-              from your dashboard. The on-chain account stays as-is —
-              this only hides the bounty from the UI. You can&apos;t undo
-              this.
-            </>
+            bounty.status === "open" ? (
+              <>
+                This will cancel the bounty on-chain and refund{" "}
+                <strong>{bounty.amountUsdc} SOL</strong> to your Privy wallet,
+                then remove <code>{bounty.repo} #{bounty.issueNumber}</code>{" "}
+                from your dashboard. You&apos;ll be asked to sign one
+                transaction. You can&apos;t undo this.
+              </>
+            ) : (
+              <>
+                This removes <code>{bounty.repo} #{bounty.issueNumber}</code>{" "}
+                from your dashboard. The bounty is no longer Open on-chain,
+                so no refund is owed. You can&apos;t undo this.
+              </>
+            )
           }
-          confirmLabel={busy ? "Deleting…" : "Delete"}
+          confirmLabel={
+            phase === "cancelling"
+              ? "Cancelling on-chain…"
+              : phase === "removing"
+                ? "Removing…"
+                : bounty.status === "open"
+                  ? "Cancel & delete"
+                  : "Delete"
+          }
           danger
           busy={busy}
           error={error}

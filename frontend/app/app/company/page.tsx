@@ -155,7 +155,11 @@ function CompanyDashboardInner() {
               </svg>
             </span>
           </button>
-          <CreateBountyForm company={company} onCreated={() => setTick((t) => t + 1)} />
+          <CreateBountyForm
+            company={company}
+            onCreated={() => setTick((t) => t + 1)}
+            refreshKey={tick}
+          />
         </aside>
       </div>
 
