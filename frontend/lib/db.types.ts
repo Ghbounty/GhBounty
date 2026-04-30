@@ -153,8 +153,23 @@ export type Database = {
           created_at: string;
           scored_at: string | null;
         };
-        Insert: never;
-        Update: never;
+        // GHB-89: surface a real Insert shape so the dev SubmitPRModal can
+        // post via PostgREST after `submit_solution` confirms.
+        Insert: {
+          id?: string;
+          chain_id: string;
+          issue_pda: string;
+          pda: string;
+          solver: string;
+          submission_index: number;
+          pr_url: string;
+          opus_report_hash: string;
+          tx_hash?: string | null;
+          state?: "pending" | "scored" | "winner";
+          created_at?: string;
+          scored_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["submissions"]["Insert"]>;
         Relationships: [];
       };
       bounty_meta: {
