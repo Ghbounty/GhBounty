@@ -42,11 +42,27 @@ export const DEFAULT_SCORER = new PublicKey(
   process.env.NEXT_PUBLIC_SCORER_PUBKEY ?? "11111111111111111111111111111111",
 );
 
-/** Matches `BOUNTY_SEED` in the on-chain `constants.rs`. */
-const BOUNTY_SEED = Buffer.from("bounty");
+/**
+ * Matches `BOUNTY_SEED` in the on-chain `constants.rs`. Built with
+ * `TextEncoder` rather than `Buffer.from` — the latter relies on a polyfill
+ * that Next.js doesn't ship to the browser by default.
+ */
+const BOUNTY_SEED = new TextEncoder().encode("bounty");
 
 export function getConnection(rpc: string = SOLANA_RPC): Connection {
   return new Connection(rpc, "confirmed");
+}
+
+/**
+ * Encode a u64 as little-endian bytes. Avoids `Buffer.writeBigUInt64LE`,
+ * which isn't reliably present in the browser (the Node Buffer polyfill
+ * shipped by webpack/Turbopack omits it). `DataView.setBigUint64` is
+ * native ES2020 and works the same in Node and the browser.
+ */
+function u64LE(value: bigint): Uint8Array {
+  const buf = new ArrayBuffer(8);
+  new DataView(buf).setBigUint64(0, value, /* littleEndian */ true);
+  return new Uint8Array(buf);
 }
 
 /**
@@ -58,10 +74,8 @@ export function findBountyPda(
   creator: PublicKey,
   bountyId: bigint,
 ): [PublicKey, number] {
-  const idBuf = Buffer.alloc(8);
-  idBuf.writeBigUInt64LE(bountyId);
   return PublicKey.findProgramAddressSync(
-    [BOUNTY_SEED, creator.toBuffer(), idBuf],
+    [BOUNTY_SEED, creator.toBuffer(), u64LE(bountyId)],
     PROGRAM_ID,
   );
 }
