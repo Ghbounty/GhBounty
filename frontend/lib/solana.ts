@@ -43,11 +43,12 @@ export const DEFAULT_SCORER = new PublicKey(
 );
 
 /**
- * Matches `BOUNTY_SEED` in the on-chain `constants.rs`. Built with
- * `TextEncoder` rather than `Buffer.from` — the latter relies on a polyfill
- * that Next.js doesn't ship to the browser by default.
+ * Matches `BOUNTY_SEED` / `SUBMISSION_SEED` in the on-chain `constants.rs`.
+ * Built with `TextEncoder` rather than `Buffer.from` — the latter relies on a
+ * polyfill that Next.js doesn't ship to the browser by default.
  */
 const BOUNTY_SEED = new TextEncoder().encode("bounty");
+const SUBMISSION_SEED = new TextEncoder().encode("submission");
 
 export function getConnection(rpc: string = SOLANA_RPC): Connection {
   return new Connection(rpc, "confirmed");
@@ -62,6 +63,16 @@ export function getConnection(rpc: string = SOLANA_RPC): Connection {
 function u64LE(value: bigint): Uint8Array {
   const buf = new ArrayBuffer(8);
   new DataView(buf).setBigUint64(0, value, /* littleEndian */ true);
+  return new Uint8Array(buf);
+}
+
+/**
+ * Encode a u32 as little-endian bytes. Used for the `submission_count` part
+ * of the submission PDA seed (the on-chain field is `u32`, not `u64`).
+ */
+function u32LE(value: number): Uint8Array {
+  const buf = new ArrayBuffer(4);
+  new DataView(buf).setUint32(0, value >>> 0, /* littleEndian */ true);
   return new Uint8Array(buf);
 }
 
@@ -179,4 +190,133 @@ export async function buildCreateBountyIx(
  */
 function generateBountyId(): bigint {
   return BigInt(Date.now());
+}
+
+/* ================================================================
+ * GHB-89: submit_solution helpers
+ * ================================================================ */
+
+/**
+ * Derive the submission PDA. Mirrors the on-chain seeds
+ *   seeds = [SUBMISSION_SEED, bounty.key().as_ref(), &bounty.submission_count.to_le_bytes()]
+ *
+ * `submissionIndex` is the value of `bounty.submission_count` *at the time of
+ * the submit* — the program reads it pre-increment when initializing the
+ * account, so the caller must fetch the current count and use that exact
+ * number. Using the post-increment count yields a different PDA and the
+ * `init` constraint on-chain will fail.
+ */
+export function findSubmissionPda(
+  bountyPda: PublicKey,
+  submissionIndex: number,
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [SUBMISSION_SEED, bountyPda.toBuffer(), u32LE(submissionIndex)],
+    PROGRAM_ID,
+  );
+}
+
+/**
+ * Read the on-chain `Bounty` account and return its `submissionCount`.
+ * Used to derive the next submission PDA. Returns `null` when the account
+ * doesn't exist (the bounty was deleted or the PDA is wrong).
+ */
+export async function fetchBountySubmissionCount(
+  bountyPda: PublicKey,
+  connection: Connection = getConnection(),
+): Promise<number | null> {
+  const program = getProgram(connection);
+  try {
+    // `program.account.bounty` is camelCase — Anchor strips snake_case at
+    // codegen time. The IDL field is `submission_count`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const acc = (await (program.account as any).bounty.fetch(bountyPda)) as {
+      submissionCount: number;
+    };
+    return acc.submissionCount;
+  } catch (err) {
+    console.warn("[fetchBountySubmissionCount] miss:", err);
+    return null;
+  }
+}
+
+export type SubmitSolutionParams = {
+  /** Solver (signer) — the developer's Solana wallet. */
+  solver: PublicKey;
+  /** PDA of the bounty being solved. Same string we persisted as `issues.pda`. */
+  bountyPda: PublicKey;
+  /** GitHub PR URL (max 200 chars, program-enforced). */
+  prUrl: string;
+  /**
+   * 32-byte hash of the off-chain Opus report. For manual submissions this is
+   * `[0; 32]` — the relayer/scorer fills in the real hash later via the
+   * `set_score` flow. Pass an explicit hash when the caller has already run
+   * Opus (e.g. preview UI).
+   */
+  opusReportHash?: Uint8Array;
+};
+
+export type SubmitSolutionTx = {
+  /** PDA where the submission will live. Persist alongside the row. */
+  submissionPda: PublicKey;
+  /**
+   * The submission index used to derive the PDA. Equal to the bounty's
+   * `submission_count` at submit time. Persist as `submissions.submission_index`.
+   */
+  submissionIndex: number;
+  /** Unsigned instruction. Caller wraps in a `Transaction` and signs+sends. */
+  ix: TransactionInstruction;
+};
+
+/**
+ * Build the `submit_solution` instruction. Reads the bounty's current
+ * `submission_count` to derive the next submission PDA, then asks Anchor to
+ * encode the call. Like `buildCreateBountyIx`, this stays signing-free so the
+ * caller (React + Privy hooks) handles the wallet UX.
+ *
+ * Race note: between `fetchBountySubmissionCount` and the actual on-chain
+ * include, another solver could grab the same index and our `init` will
+ * fail with "account already exists". We surface that error verbatim — the
+ * UI prompts the user to retry, which re-fetches the count.
+ */
+export async function buildSubmitSolutionIx(
+  params: SubmitSolutionParams,
+  connection: Connection = getConnection(),
+): Promise<SubmitSolutionTx> {
+  if (params.prUrl.length > 200) {
+    throw new Error(`pr_url too long (${params.prUrl.length} chars, max 200)`);
+  }
+
+  const opusReportHash = params.opusReportHash ?? new Uint8Array(32);
+  if (opusReportHash.length !== 32) {
+    throw new Error(`opus_report_hash must be 32 bytes (got ${opusReportHash.length})`);
+  }
+
+  const submissionIndex = await fetchBountySubmissionCount(
+    params.bountyPda,
+    connection,
+  );
+  if (submissionIndex == null) {
+    throw new Error(
+      `Bounty PDA ${params.bountyPda.toBase58()} not found on-chain.`,
+    );
+  }
+
+  const [submissionPda] = findSubmissionPda(params.bountyPda, submissionIndex);
+
+  const program = getProgram(connection);
+  const ix = await program.methods
+    .submitSolution(
+      params.prUrl,
+      Array.from(opusReportHash) as unknown as number[],
+    )
+    .accountsStrict({
+      solver: params.solver,
+      bounty: params.bountyPda,
+      submission: submissionPda,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+  return { submissionPda, submissionIndex, ix };
 }
