@@ -57,7 +57,7 @@ export function BountyRow({
       <div className="bounty-card-foot">
         <div className="bounty-amount">
           <span className="bounty-amount-val">{bounty.amountUsdc.toLocaleString()}</span>
-          <span className="musdc-pill">
+          <span className="sol-pill">
             SOL
           </span>
         </div>
