@@ -5,6 +5,7 @@ import { useWallets } from "@privy-io/react-auth/solana";
 import { parseIssueUrl } from "@/lib/github";
 import { CreateBountyFlow, type CreateBountyData } from "./CreateBountyFlow";
 import { ReleaseModePicker } from "./ReleaseModePicker";
+import { WithdrawModal } from "./WithdrawModal";
 import { getConnection } from "@/lib/solana";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { usePrivyBackend } from "@/lib/auth-context";
@@ -27,6 +28,7 @@ export function CreateBountyForm({
   const [flowData, setFlowData] = useState<CreateBountyData | null>(null);
   const [releaseMode, setReleaseMode] = useState<ReleaseMode>("auto");
   const [balanceSol, setBalanceSol] = useState<number | null>(null);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
 
   // Wallet (Privy in real mode, fall back to mock store wallet otherwise)
@@ -161,6 +163,23 @@ export function CreateBountyForm({
                 ? "—"
                 : "not connected"}
           </span>
+          {/* Withdraw is gated on Privy mode + an actual balance to send.
+              The button stays disabled (instead of hidden) so the layout
+              doesn't jump around while the balance is loading. */}
+          <button
+            type="button"
+            className="wallet-withdraw"
+            onClick={() => setWithdrawOpen(true)}
+            disabled={
+              !privyMode ||
+              !wallets[0] ||
+              balanceSol === null ||
+              balanceSol <= 0
+            }
+            title="Send SOL from your Privy wallet to an external address"
+          >
+            Withdraw
+          </button>
         </div>
 
         <label className="field">
@@ -247,6 +266,18 @@ export function CreateBountyForm({
           data={flowData}
           onClose={handleFlowClose}
           onCreated={handleFlowCreated}
+        />
+      )}
+
+      {withdrawOpen && wallets[0] && (
+        <WithdrawModal
+          wallet={wallets[0]}
+          balanceSol={balanceSol}
+          onClose={() => setWithdrawOpen(false)}
+          // Reuse the parent's `onCreated` signal to bump `tick` — the
+          // dashboard's `tick` flows back into our `refreshKey`, which
+          // refetches the balance. Same plumbing the delete flow uses.
+          onWithdrawn={() => onCreated?.()}
         />
       )}
     </>
