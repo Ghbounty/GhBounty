@@ -238,7 +238,7 @@ export function BulkBountyFlow({
                 <span className="bulk-col-chk" />
                 <span className="bulk-col-issue">Issue</span>
                 <span className="bulk-col-complex">Complexity</span>
-                <span className="bulk-col-amount">mUSDC</span>
+                <span className="bulk-col-amount">SOL</span>
               </div>
               <div className="bulk-table-body">
                 {issues.map((i) => (
@@ -301,7 +301,7 @@ export function BulkBountyFlow({
                   {total.toLocaleString()}
                 </span>
                 <span className="musdc-pill">
-                  <UsdcIcon size={16} />mUSDC total
+                  SOL total
                 </span>
               </div>
             </div>
@@ -363,7 +363,7 @@ export function BulkBountyFlow({
               </div>
               <div>
                 <strong>
-                  {posted.total.toLocaleString()} mUSDC locked in escrow across{" "}
+                  {posted.total.toLocaleString()} SOL locked in escrow across{" "}
                   {posted.count} issues.
                 </strong>
                 <p>

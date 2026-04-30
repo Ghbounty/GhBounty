@@ -81,8 +81,8 @@ function CompanyDashboardInner() {
           <Stat label="Bounties" value={bounties.length.toString()} />
           <Stat label="Open" value={counts.open.toString()} />
           <Stat label="Paid" value={counts.paid.toString()} />
-          <Stat label="Funded" value={`${totalFunded.toLocaleString()} mUSDC`} />
-          <Stat label="Released" value={`${totalPaid.toLocaleString()} mUSDC`} />
+          <Stat label="Funded" value={`${totalFunded.toLocaleString()} SOL`} />
+          <Stat label="Released" value={`${totalPaid.toLocaleString()} SOL`} />
         </div>
       </section>
 

@@ -175,11 +175,11 @@ function CompanyProfile() {
         </div>
         <div className="stat-pill">
           <span className="stat-val">{funded.toLocaleString()}</span>
-          <span className="stat-lbl">Funded mUSDC</span>
+          <span className="stat-lbl">Funded SOL</span>
         </div>
         <div className="stat-pill">
           <span className="stat-val">{paid.toLocaleString()}</span>
-          <span className="stat-lbl">Released mUSDC</span>
+          <span className="stat-lbl">Released SOL</span>
         </div>
       </div>
     </div>
@@ -373,7 +373,7 @@ function DevProfile() {
         </div>
         <div className="stat-pill">
           <span className="stat-val">{totalEarned.toLocaleString()}</span>
-          <span className="stat-lbl">Earned mUSDC</span>
+          <span className="stat-lbl">Earned SOL</span>
         </div>
       </div>
 
@@ -453,7 +453,7 @@ function SubmissionRow({
               {bounty.amountUsdc.toLocaleString()}
             </span>
             <span className="musdc-pill">
-              <UsdcIcon size={16} />mUSDC
+              SOL
             </span>
           </div>
         )}

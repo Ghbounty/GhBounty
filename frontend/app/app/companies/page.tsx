@@ -121,7 +121,7 @@ function Inner() {
                 <b>{total}</b> total
               </span>
               <span>
-                <b>{funded.toLocaleString()}</b> mUSDC funded
+                <b>{funded.toLocaleString()}</b> SOL funded
               </span>
             </div>
           </Link>

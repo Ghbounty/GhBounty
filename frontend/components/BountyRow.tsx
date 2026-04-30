@@ -55,7 +55,7 @@ export function BountyRow({
         <div className="bounty-amount">
           <span className="bounty-amount-val">{bounty.amountUsdc.toLocaleString()}</span>
           <span className="musdc-pill">
-            <UsdcIcon size={16} />mUSDC
+            SOL
           </span>
         </div>
         {action}

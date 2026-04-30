@@ -100,7 +100,7 @@ function DevDashboardInner() {
           </div>
           <div className="stat-pill">
             <span className="stat-val">{totalAvailable.toLocaleString()}</span>
-            <span className="stat-lbl">Open mUSDC</span>
+            <span className="stat-lbl">Open SOL</span>
           </div>
         </div>
       </section>
