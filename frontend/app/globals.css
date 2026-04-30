@@ -1801,6 +1801,16 @@ section { position: relative; padding: 120px 40px; }
 .processing-step.done .processing-step-label {
   color: var(--text-dim);
 }
+.processing-step.error .processing-step-mark {
+  background: rgba(255, 107, 107, 0.10);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  box-shadow: 0 0 14px rgba(255, 107, 107, 0.25);
+}
+.processing-step.error .processing-step-label {
+  color: var(--danger);
+  font-weight: 500;
+}
 
 .processing-spinner {
   width: 12px; height: 12px;
