@@ -47,6 +47,7 @@ export type CreateBountyData = {
   issueNumber: number;
   issueUrl: string;
   title?: string;
+  description?: string;
   /** Amount in SOL (devnet). Converted to lamports before signing. */
   amount: number;
   releaseMode: ReleaseMode;
@@ -180,6 +181,7 @@ export function CreateBountyFlow({
         amount: amountLamports,
         githubIssueUrl: data.issueUrl,
         title: data.title,
+        description: data.description,
         releaseMode: data.releaseMode === "auto" ? "auto" : "assisted",
         rejectThreshold: data.rejectThreshold ?? null,
         evaluationCriteria: data.evaluationCriteria ?? null,

@@ -3,7 +3,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useAuth } from "@/lib/auth";
+import { useAuth, usePrivyBackend } from "@/lib/auth-context";
+import { useWallets } from "@privy-io/react-auth/solana";
 import { mockWallet, setWallet } from "@/lib/store";
 import { Avatar } from "./Avatar";
 
@@ -16,11 +17,19 @@ export function AppNav() {
   const { user, logout, refresh } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  // In Privy mode the wallet lives on the Solana wallet hook, not on the
+  // mock `user.wallet` field (which is localStorage from the old store).
+  // We surface whichever is real so the header always reflects what
+  // CreateBountyFlow will actually sign with.
+  const privyMode = usePrivyBackend;
+  const { wallets } = useWallets();
+  const privyWallet = wallets[0]?.address ?? null;
 
   if (!user) return null;
 
   const isCompany = user.role === "company";
   const displayName = isCompany ? user.name : user.username;
+  const walletAddress = privyMode ? privyWallet : user.wallet ?? null;
 
   const tabs = isCompany
     ? [{ href: "/app/company", label: "Bounties" }]
@@ -30,12 +39,22 @@ export function AppNav() {
       ];
 
   function handleConnect() {
+    // Legacy-only: the mock store fakes a wallet for the localStorage flow.
+    // In Privy mode wallets are minted by `embeddedWallets.solana.createOnLogin`,
+    // so this button is hidden via `walletAddress` being non-null.
     const addr = mockWallet();
     setWallet(user!.id, addr);
     refresh();
   }
 
   function handleDisconnect() {
+    if (privyMode) {
+      // Disconnecting in Privy mode means logging out — the embedded wallet
+      // is tied to the session.
+      void logout();
+      router.replace("/app/auth");
+      return;
+    }
     setWallet(user!.id, undefined);
     refresh();
   }
@@ -62,14 +81,14 @@ export function AppNav() {
           })}
         </nav>
         <div className="appnav-right">
-          {user.wallet ? (
+          {walletAddress ? (
             <button
               className="wallet-btn connected"
               onClick={handleDisconnect}
-              title="Click to disconnect"
+              title={privyMode ? "Click to log out" : "Click to disconnect"}
             >
               <span className="wallet-btn-dot" />
-              <code>{shortWallet(user.wallet)}</code>
+              <code>{shortWallet(walletAddress)}</code>
             </button>
           ) : (
             <button className="wallet-btn" onClick={handleConnect}>

@@ -1,9 +1,13 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { useWallets } from "@privy-io/react-auth/solana";
 import { parseIssueUrl } from "@/lib/github";
 import { CreateBountyFlow, type CreateBountyData } from "./CreateBountyFlow";
 import { ReleaseModePicker } from "./ReleaseModePicker";
+import { getConnection } from "@/lib/solana";
+import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { usePrivyBackend } from "@/lib/auth-context";
 import type { Company, ReleaseMode } from "@/lib/types";
 
 export function CreateBountyForm({
@@ -16,7 +20,39 @@ export function CreateBountyForm({
   const [error, setError] = useState<string | null>(null);
   const [flowData, setFlowData] = useState<CreateBountyData | null>(null);
   const [releaseMode, setReleaseMode] = useState<ReleaseMode>("auto");
+  const [balanceSol, setBalanceSol] = useState<number | null>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
+
+  // Wallet (Privy in real mode, fall back to mock store wallet otherwise)
+  const privyMode = usePrivyBackend;
+  const { wallets } = useWallets();
+  const walletAddress = privyMode
+    ? wallets[0]?.address ?? null
+    : company.wallet ?? null;
+
+  // Fetch SOL balance on mount + whenever the wallet changes. We hit the
+  // RPC directly (no cache) because the value matters at click-time and
+  // the form is rarely visible long enough for staleness to matter.
+  useEffect(() => {
+    if (!walletAddress) {
+      setBalanceSol(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const conn = getConnection();
+        const lamports = await conn.getBalance(new PublicKey(walletAddress));
+        if (!cancelled) setBalanceSol(lamports / LAMPORTS_PER_SOL);
+      } catch (err) {
+        console.warn("[CreateBountyForm] balance fetch failed:", err);
+        if (!cancelled) setBalanceSol(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -25,6 +61,9 @@ export function CreateBountyForm({
     const url = (f.elements.namedItem("issueUrl") as HTMLInputElement).value.trim();
     const amountRaw = (f.elements.namedItem("amount") as HTMLInputElement).value;
     const title = (f.elements.namedItem("title") as HTMLInputElement).value.trim();
+    const description = (
+      f.elements.namedItem("description") as HTMLTextAreaElement
+    )?.value.trim();
     const rejectRaw = (
       f.elements.namedItem("rejectThreshold") as HTMLInputElement
     )?.value;
@@ -55,11 +94,22 @@ export function CreateBountyForm({
       rejectThreshold = n;
     }
 
+    // Also block the submit if the user is trying to lock more than they
+    // have. Tx would fail in the wallet anyway, but a client-side guard
+    // saves a popup + a failed network round-trip.
+    if (balanceSol !== null && amount > balanceSol) {
+      setError(
+        `Insufficient SOL — wallet has ${balanceSol.toFixed(4)}, requested ${amount}.`,
+      );
+      return;
+    }
+
     setFlowData({
       repo: parsed.repo,
       issueNumber: parsed.issueNumber,
       issueUrl: url,
       title: title || undefined,
+      description: description || undefined,
       amount,
       releaseMode,
       rejectThreshold,
@@ -129,6 +179,11 @@ export function CreateBountyForm({
           <label className="field">
             <span className="field-label">
               Bounty amount <span className="musdc-inline">SOL</span>
+              {balanceSol !== null && (
+                <span className="field-hint">
+                  {" "}· balance {balanceSol.toFixed(4)} SOL
+                </span>
+              )}
             </span>
             <input
               name="amount"
@@ -140,6 +195,15 @@ export function CreateBountyForm({
             />
           </label>
         </div>
+
+        <label className="field">
+          <span className="field-label">Description (optional)</span>
+          <textarea
+            name="description"
+            rows={5}
+            placeholder="What needs to be done, expected behavior, edge cases…"
+          />
+        </label>
 
         <div className="field">
           <span className="field-label">Release mode</span>
@@ -164,7 +228,7 @@ export function CreateBountyForm({
           <span className="field-label">Evaluation criteria (optional)</span>
           <textarea
             name="evaluationCriteria"
-            rows={2}
+            rows={4}
             placeholder="Must include tests for the new behavior."
           />
         </label>
