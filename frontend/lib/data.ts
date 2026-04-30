@@ -77,7 +77,7 @@ export async function fetchCompanies(): Promise<Company[]> {
   const { data, error } = await supabase
     .from("companies")
     .select(
-      "user_id, name, slug, description, website, industry, logo_url, profile:profiles!inner(email, created_at)",
+      "user_id, name, slug, description, website, industry, logo_url, profile:profiles!left(email, created_at)",
     )
     .returns<CompanyRow[]>();
   if (error) {
@@ -99,7 +99,7 @@ export async function fetchCompany(id: string): Promise<Company | null> {
   const { data, error } = await supabase
     .from("companies")
     .select(
-      "user_id, name, slug, description, website, industry, logo_url, profile:profiles!inner(email, created_at)",
+      "user_id, name, slug, description, website, industry, logo_url, profile:profiles!left(email, created_at)",
     )
     .eq("user_id", id)
     .single<CompanyRow>();
@@ -148,7 +148,7 @@ export async function fetchDevelopers(): Promise<Dev[]> {
   const { data, error } = await supabase
     .from("developers")
     .select(
-      "user_id, username, github_handle, bio, skills, avatar_url, profile:profiles!inner(email, created_at)",
+      "user_id, username, github_handle, bio, skills, avatar_url, profile:profiles!left(email, created_at)",
     )
     .returns<DevRow[]>();
   if (error) {
@@ -170,7 +170,7 @@ export async function fetchDeveloper(id: string): Promise<Dev | null> {
   const { data, error } = await supabase
     .from("developers")
     .select(
-      "user_id, username, github_handle, bio, skills, avatar_url, profile:profiles!inner(email, created_at)",
+      "user_id, username, github_handle, bio, skills, avatar_url, profile:profiles!left(email, created_at)",
     )
     .eq("user_id", id)
     .single<DevRow>();
