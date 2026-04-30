@@ -241,7 +241,16 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
   const privy = usePrivy();
   const supabase = useMemo<DBClient>(() => createClient(), []);
   const [user, setUser] = useState<User | null>(null);
-  const [hydrating, setHydrating] = useState(false);
+  // `hydrating` starts true so refreshes don't flash an "unauthenticated"
+  // state before our hydration effect runs. The flow on hard reload is:
+  //   1. Privy mounts with `ready=false`, `authenticated=false` → ready=false.
+  //   2. Privy reads its session from storage → `ready=true`, `authenticated=true`.
+  //   3. Re-render happens BEFORE our hydration effect fires. If we initialize
+  //      hydrating=false, the consumer sees `ready=true && user=null` for one
+  //      tick and `Guard` redirects to /app/auth.
+  // Initializing to true keeps `ready` false until we either load the user
+  // from Supabase or determine no privy session exists.
+  const [hydrating, setHydrating] = useState(true);
   const [pendingError, setPendingError] = useState<string | null>(null);
   const lastUserIdRef = useRef<string | null>(null);
   const pendingRef = useRef<PendingRegistration | null>(null);
@@ -275,11 +284,19 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
     if (!privy.authenticated || !privyId) {
       lastUserIdRef.current = null;
       setUser(null);
+      // No session — we're done resolving. Drop the hydrating flag so the
+      // route guard can move on (typically by sending the user to /app/auth).
+      setHydrating(false);
       return;
     }
     // Avoid duplicate work if the same user is still authenticated and
     // already hydrated. Pending registrations always re-run.
-    if (lastUserIdRef.current === privyId && user && !pendingRef.current) return;
+    if (lastUserIdRef.current === privyId && user && !pendingRef.current) {
+      // Already hydrated for this Privy DID; make sure we're not stuck in
+      // the initial `hydrating=true` state.
+      setHydrating(false);
+      return;
+    }
 
     setHydrating(true);
     void (async () => {
