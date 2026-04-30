@@ -4,7 +4,6 @@ import { FormEvent, useRef, useState } from "react";
 import { parseIssueUrl } from "@/lib/github";
 import { CreateBountyFlow, type CreateBountyData } from "./CreateBountyFlow";
 import { ReleaseModePicker } from "./ReleaseModePicker";
-import { UsdcIcon } from "./UsdcIcon";
 import type { Company, ReleaseMode } from "@/lib/types";
 
 export function CreateBountyForm({
@@ -26,6 +25,12 @@ export function CreateBountyForm({
     const url = (f.elements.namedItem("issueUrl") as HTMLInputElement).value.trim();
     const amountRaw = (f.elements.namedItem("amount") as HTMLInputElement).value;
     const title = (f.elements.namedItem("title") as HTMLInputElement).value.trim();
+    const rejectRaw = (
+      f.elements.namedItem("rejectThreshold") as HTMLInputElement
+    )?.value;
+    const criteria = (
+      f.elements.namedItem("evaluationCriteria") as HTMLTextAreaElement
+    )?.value.trim();
 
     const parsed = parseIssueUrl(url);
     if (!parsed) {
@@ -38,6 +43,18 @@ export function CreateBountyForm({
       return;
     }
 
+    // Threshold is optional — empty means "no auto-rejection". When set,
+    // it must be 1-10 to match the on-chain score range.
+    let rejectThreshold: number | null = null;
+    if (rejectRaw && rejectRaw.length > 0) {
+      const n = Number(rejectRaw);
+      if (!Number.isInteger(n) || n < 1 || n > 10) {
+        setError("Reject threshold must be an integer between 1 and 10.");
+        return;
+      }
+      rejectThreshold = n;
+    }
+
     setFlowData({
       repo: parsed.repo,
       issueNumber: parsed.issueNumber,
@@ -45,6 +62,8 @@ export function CreateBountyForm({
       title: title || undefined,
       amount,
       releaseMode,
+      rejectThreshold,
+      evaluationCriteria: criteria || null,
     });
   }
 
@@ -109,23 +128,16 @@ export function CreateBountyForm({
 
           <label className="field">
             <span className="field-label">
-              Bounty amount <span className="musdc-inline">
-                <UsdcIcon size={12} />mUSDC
-              </span>
+              Bounty amount <span className="musdc-inline">SOL</span>
             </span>
-            <div className="field-with-icon">
-              <span className="field-icon">
-                <UsdcIcon size={18} />
-              </span>
-              <input
-                name="amount"
-                type="number"
-                min={1}
-                step={1}
-                placeholder="100"
-                required
-              />
-            </div>
+            <input
+              name="amount"
+              type="number"
+              min={0.001}
+              step={0.001}
+              placeholder="0.5"
+              required
+            />
           </label>
         </div>
 
@@ -133,6 +145,29 @@ export function CreateBountyForm({
           <span className="field-label">Release mode</span>
           <ReleaseModePicker value={releaseMode} onChange={setReleaseMode} compact />
         </div>
+
+        <div className="field-row">
+          <label className="field">
+            <span className="field-label">Reject threshold (1-10, optional)</span>
+            <input
+              name="rejectThreshold"
+              type="number"
+              min={1}
+              max={10}
+              step={1}
+              placeholder="8"
+            />
+          </label>
+        </div>
+
+        <label className="field">
+          <span className="field-label">Evaluation criteria (optional)</span>
+          <textarea
+            name="evaluationCriteria"
+            rows={2}
+            placeholder="Must include tests for the new behavior."
+          />
+        </label>
 
         {error && <div className="form-error">{error}</div>}
 
