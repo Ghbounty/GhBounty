@@ -190,11 +190,20 @@ export function CreateBountyFlow({
 
       // PHASE_CONFIRM: wait for the cluster. `confirmed` is enough on
       // devnet — `finalized` would be safer but adds ~10s of UX wait.
+      // CRITICAL: `confirmTransaction` resolves even when the tx reverted
+      // (program error). The failure is in `value.err`, not thrown. Check
+      // it explicitly so the modal stops at this step instead of pinning
+      // the failure on the DB insert with a confusing message.
       setPhase(PHASE_CONFIRM);
-      await connection.confirmTransaction(
+      const confirmation = await connection.confirmTransaction(
         { signature: sig, blockhash, lastValidBlockHeight },
         "confirmed",
       );
+      if (confirmation.value.err) {
+        throw new Error(
+          `Bounty creation reverted on-chain: ${JSON.stringify(confirmation.value.err)}.`,
+        );
+      }
 
       // PHASE_INDEX: persist the off-chain rows.
       setPhase(PHASE_INDEX);

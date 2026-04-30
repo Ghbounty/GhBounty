@@ -213,12 +213,24 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
 
       // PHASE_CONFIRM: wait for confirmation. `confirmed` is enough —
       // `finalized` would add ~10s of UX wait for a marginal safety win
-      // on devnet.
+      // on devnet. CRITICAL: `confirmTransaction` resolves even when the
+      // on-chain tx reverted (program error / constraint violation). The
+      // failure shows up in `value.err`, not as a thrown error — so we
+      // must check it explicitly. Without this guard, the modal pretends
+      // the tx succeeded and we surface a confusing DB error two steps
+      // later (typically the `submissions_pda_unique` 409 you'd hit on
+      // a duplicate submit_solution).
       setPhase(PHASE_CONFIRM);
-      await connection.confirmTransaction(
+      const confirmation = await connection.confirmTransaction(
         { signature: sig, blockhash, lastValidBlockHeight },
         "confirmed",
       );
+      if (confirmation.value.err) {
+        throw new Error(
+          `Submit reverted on-chain: ${JSON.stringify(confirmation.value.err)}. ` +
+            `The submission PDA likely already exists for this bounty (replay).`,
+        );
+      }
 
       // PHASE_INDEX: persist the off-chain rows.
       setPhase(PHASE_INDEX);
