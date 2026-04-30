@@ -55,12 +55,35 @@ type FormData = { prUrl: string; note?: string };
 
 const CHAIN_ID = "solana-devnet";
 
+/**
+ * Indices into the controlled-mode `<ProcessingSteps>` list. Mirror the
+ * order of the steps array below so the cursor stays in sync with the
+ * label the user sees.
+ */
+const PHASE_BUILD = 0;
+const PHASE_SIGN = 1;
+const PHASE_CONFIRM = 2;
+const PHASE_INDEX = 3;
+
+const PROCESSING_STEPS = [
+  { id: "build", label: "Building transaction" },
+  { id: "sign", label: "Signing in your wallet" },
+  { id: "confirm", label: "Confirming on Solana devnet" },
+  { id: "index", label: "Indexing in Supabase" },
+];
+
 export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
   const [step, setStep] = useState<Step>("form");
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<FormData | null>(null);
   const [txSig, setTxSig] = useState<string | null>(null);
   const [submissionPda, setSubmissionPda] = useState<string | null>(null);
+  // GHB-169: drive `<ProcessingSteps>` from the real flow so each phase
+  // only marks done when its await actually resolves. `phase` is an index
+  // into PROCESSING_STEPS; `phaseError` flips the active step to its red
+  // failure state when something throws.
+  const [phase, setPhase] = useState<number>(PHASE_BUILD);
+  const [phaseError, setPhaseError] = useState(false);
   const sentRef = useRef(false);
 
   const privyMode = usePrivyBackend;
@@ -126,6 +149,9 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
     if (sentRef.current) return;
     sentRef.current = true;
 
+    setPhase(PHASE_BUILD);
+    setPhaseError(false);
+
     try {
       if (!privyMode) {
         throw new Error(
@@ -143,10 +169,10 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
       const solver = new PublicKey(walletAddress);
       const bountyPda = new PublicKey(bounty.id);
 
-      // 1. Build the unsigned instruction. This reads `submission_count`
-      //    on-chain to derive the next submission PDA. Manual submits send
-      //    a zero hash — the off-chain Opus pipeline records the real hash
-      //    in `evaluations.report_hash` afterwards.
+      // PHASE_BUILD: build the unsigned instruction. Reads
+      // `submission_count` on-chain to derive the next submission PDA.
+      // Manual submits send a zero hash — the off-chain Opus pipeline
+      // records the real hash in `evaluations.report_hash` afterwards.
       const { ix, submissionPda: pda, submissionIndex } = await buildSubmitSolutionIx(
         {
           solver,
@@ -156,7 +182,6 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
         connection,
       );
 
-      // 2. Wrap in a Transaction with a fresh blockhash.
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
         "confirmed",
       );
@@ -166,7 +191,9 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
       }).add(ix);
       const serialized = tx.serialize({ requireAllSignatures: false });
 
-      // 3. Hand off to Privy — pops the wallet UI.
+      // PHASE_SIGN: hand off to Privy — pops the wallet UI. This is the
+      // step that takes the longest in practice (waiting on the user).
+      setPhase(PHASE_SIGN);
       const { signature } = await signAndSendTransaction({
         transaction: serialized,
         wallet,
@@ -176,14 +203,17 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
       setTxSig(sig);
       setSubmissionPda(pda.toBase58());
 
-      // 4. Wait for confirmation. `confirmed` is enough — `finalized` would
-      //    add ~10s of UX wait for a marginal safety win on devnet.
+      // PHASE_CONFIRM: wait for confirmation. `confirmed` is enough —
+      // `finalized` would add ~10s of UX wait for a marginal safety win
+      // on devnet.
+      setPhase(PHASE_CONFIRM);
       await connection.confirmTransaction(
         { signature: sig, blockhash, lastValidBlockHeight },
         "confirmed",
       );
 
-      // 5. Persist the off-chain rows.
+      // PHASE_INDEX: persist the off-chain rows.
+      setPhase(PHASE_INDEX);
       const supabase = createClient();
       await insertSubmissionAndMeta(supabase, {
         chainId: CHAIN_ID,
@@ -200,9 +230,15 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
         submittedByUserId: user.id,
       });
 
+      // Bump the cursor past the last step so every entry renders as
+      // "done" while the modal swaps to the success view.
+      setPhase(PROCESSING_STEPS.length);
       setStep("success");
     } catch (err) {
       console.error("[SubmitPRModal] failed:", err);
+      // Mark the currently-active step in red before flipping to the
+      // error view so the user sees *which* phase failed.
+      setPhaseError(true);
       setError(err instanceof Error ? err.message : "Submission failed.");
       setStep("error");
       sentRef.current = false; // allow retry
@@ -225,6 +261,8 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
 
   function handleRetry() {
     setError(null);
+    setPhase(PHASE_BUILD);
+    setPhaseError(false);
     setStep("form");
   }
 
@@ -335,16 +373,9 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
         {step === "processing" && (
           <>
             <ProcessingSteps
-              steps={[
-                { id: "build", label: "Building transaction", duration: 600 },
-                { id: "sign", label: "Signing in your wallet", duration: 1200 },
-                { id: "confirm", label: "Confirming on Solana devnet", duration: 1500 },
-                { id: "index", label: "Indexing in Supabase", duration: 600 },
-              ]}
-              onComplete={() => {
-                /* Animation is purely visual — `runRealFlow()` drives the
-                   actual step transition. */
-              }}
+              steps={PROCESSING_STEPS}
+              currentStep={phase}
+              error={phaseError}
             />
             <p className="modal-note">
               Keep this window open — your wallet is signing. This may take a
@@ -399,6 +430,14 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
 
         {step === "error" && (
           <>
+            {/* Re-render the steps list with the failing phase marked in
+                red so the user sees *which* step blew up before reading
+                the message. */}
+            <ProcessingSteps
+              steps={PROCESSING_STEPS}
+              currentStep={phase}
+              error
+            />
             <div className="form-error">{error}</div>
 
             <p className="modal-note">
