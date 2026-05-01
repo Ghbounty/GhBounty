@@ -1166,7 +1166,10 @@ section { position: relative; padding: 120px 40px; }
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.musdc-pill {
+/* Token-agnostic pill (was `.musdc-pill` until GHB-14). The token symbol
+ * shown inside is dynamic per-bounty — currently always "SOL", but USDC /
+ * SPL is on the roadmap so the class name stays neutral. */
+.token-pill {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--text-dim);
   font-family: var(--font-mono);

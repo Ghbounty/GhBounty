@@ -300,7 +300,7 @@ export function BulkBountyFlow({
                 <span className="bulk-total-val">
                   {total.toLocaleString()}
                 </span>
-                <span className="musdc-pill">
+                <span className="token-pill">
                   SOL total
                 </span>
               </div>
