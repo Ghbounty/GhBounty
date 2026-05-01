@@ -2665,6 +2665,25 @@ section { position: relative; padding: 120px 40px; }
   font-family: var(--font-mono);
   font-size: 11.5px; letter-spacing: .05em;
 }
+/* GHB-84: dev marketplace — rejected submissions render this clickable
+ * pill that links to /app/profile. We don't surface the company's
+ * feedback here (the dashboard is meant for browsing); the dev clicks
+ * through to read it in context with their full submission. */
+.rejected-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 8px;
+  background: rgba(255, 107, 107, 0.05);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: #FF6B6B;
+  font-family: var(--font-mono);
+  font-size: 11.5px; letter-spacing: .05em;
+  text-decoration: none;
+  transition: background-color .12s, border-color .12s;
+}
+.rejected-pill:hover {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.5);
+}
 
 .status-badge.submission-pending { color: #FEBC2E; border-color: rgba(254, 188, 46, 0.3); background: rgba(254, 188, 46, 0.06); }
 .status-badge.submission-accepted { color: var(--accent); border-color: var(--border-strong); background: rgba(0, 229, 209, 0.06); }

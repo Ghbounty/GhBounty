@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Guard } from "@/components/Guard";
 import { BountyRow } from "@/components/BountyRow";
 import { SubmitPRModal } from "@/components/SubmitPRModal";
@@ -72,6 +73,14 @@ function DevDashboardInner() {
   const [submittedBountyIds, setSubmittedBountyIds] = useState<Set<string>>(
     new Set(),
   );
+  // GHB-84: bounties where the dev's own submission got rejected by the
+  // company. Tracked separately from `submittedBountyIds` so the row
+  // action can swap "PR submitted" for a "Rejected — see profile" link.
+  // We deliberately do NOT surface the company's feedback text here —
+  // it lives on /app/profile where the dev reads it in context.
+  const [rejectedBountyIds, setRejectedBountyIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   useEffect(() => {
     const h = () => setTick((t) => t + 1);
@@ -89,6 +98,13 @@ function DevDashboardInner() {
       setBounties(bs);
       setCompanies(cs);
       setSubmittedBountyIds(new Set(subs.map((s) => s.bountyId)));
+      setRejectedBountyIds(
+        new Set(
+          subs
+            .filter((s) => s.status === "rejected")
+            .map((s) => s.bountyId),
+        ),
+      );
     });
     return () => {
       cancelled = true;
@@ -204,34 +220,54 @@ function DevDashboardInner() {
         <div className="bounty-stack">
           {filtered.map((b) => {
             const submitted = submittedBountyIds.has(b.id);
+            const rejected = rejectedBountyIds.has(b.id);
+            // Three-way action gate (rejected wins over submitted because
+            // it's the strictly newer state — a rejected sub is always
+            // also a submitted one):
+            //   rejected  → "Rejected — see profile" (Link to /app/profile)
+            //   submitted → "PR submitted" pill
+            //   neither   → "Submit PR" button
+            let action: React.ReactNode;
+            if (rejected) {
+              action = (
+                <Link href="/app/profile" className="rejected-pill">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                  Rejected — see profile
+                </Link>
+              );
+            } else if (submitted) {
+              action = (
+                <span className="submitted-pill">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                  PR submitted
+                </span>
+              );
+            } else {
+              action = (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setModalFor(b)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="6" cy="6" r="3" />
+                    <circle cx="18" cy="18" r="3" />
+                    <path d="M6 9v6a6 6 0 006 6h3" />
+                  </svg>
+                  Submit PR
+                </button>
+              );
+            }
             return (
               <BountyRow
                 key={b.id}
                 bounty={b}
                 company={companyMap.get(b.companyId)}
                 showCompany
-                action={
-                  submitted ? (
-                    <span className="submitted-pill">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                      PR submitted
-                    </span>
-                  ) : (
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => setModalFor(b)}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="6" cy="6" r="3" />
-                        <circle cx="18" cy="18" r="3" />
-                        <path d="M6 9v6a6 6 0 006 6h3" />
-                      </svg>
-                      Submit PR
-                    </button>
-                  )
-                }
+                action={action}
               />
             );
           })}
