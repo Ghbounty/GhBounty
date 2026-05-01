@@ -1361,6 +1361,34 @@ section { position: relative; padding: 120px 40px; }
 }
 .submission-time { font-family: var(--font-mono); font-size: 11px; }
 
+/* GHB-83+84: solver wallet pill (live balance + copy) -------------- */
+.solver-wallet {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+.solver-wallet-addr {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color .2s, color .2s;
+}
+.solver-wallet-addr:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.solver-wallet-addr code { font-family: inherit; font-size: 11px; }
+.solver-wallet-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(0, 229, 209, 0.5);
+}
 /* GHB-83+84: action button row + decided-card states ---------------- */
 .submission-card-actions {
   display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;

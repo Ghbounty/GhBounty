@@ -241,6 +241,7 @@ function SubmissionCard({
                 @{s.dev.githubHandle}
               </a>
             )}
+            <SolverWalletInfo solver={s.solver} />
           </div>
         </div>
         <div className="submission-card-badges">
@@ -351,6 +352,45 @@ function SubmissionCard({
       </div>
     </li>
   );
+}
+
+/**
+ * Address chip for the dev's solver pubkey — clickable to copy the
+ * full base58 to clipboard. Deliberately does NOT show the dev's SOL
+ * balance: the company shouldn't see how much the dev holds (that's
+ * the dev's private info; surfaced in their own dashboard instead).
+ */
+function SolverWalletInfo({ solver }: { solver: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(solver);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — silent fail. */
+    }
+  };
+
+  return (
+    <div className="solver-wallet">
+      <button
+        type="button"
+        className="solver-wallet-addr"
+        onClick={onCopy}
+        title="Click to copy full address"
+      >
+        <span className="solver-wallet-dot" />
+        <code>{copied ? "Copied!" : shortAddr(solver)}</code>
+      </button>
+    </div>
+  );
+}
+
+function shortAddr(s: string): string {
+  if (s.length < 12) return s;
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
 }
 
 function timeAgo(ms: number): string {

@@ -1,33 +1,55 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { useWallets } from "@privy-io/react-auth/solana";
 import { Guard } from "@/components/Guard";
 import { BountyRow } from "@/components/BountyRow";
+import { DepositModal } from "@/components/DepositModal";
 import { SubmitPRModal } from "@/components/SubmitPRModal";
-import { useAuth } from "@/lib/auth";
+import { WithdrawModal } from "@/components/WithdrawModal";
+import { useAuth, usePrivyBackend } from "@/lib/auth-context";
 import { fetchMarketplace, fetchSubmissionsByDev } from "@/lib/data";
+import { getConnection } from "@/lib/solana";
 import type { Bounty, Company } from "@/lib/types";
 
 type StatusFilter = "all" | "open" | "reviewing" | "approved";
 const STATUS_FILTERS: StatusFilter[] = ["all", "open", "reviewing", "approved"];
 
 /**
- * Decide whether a bounty matches a given UI filter. The filters are
- * deliberately non-exclusive — a bounty that's still accepting new PRs
- * AND has at least one submission matches both "Open" and "Reviewing".
+ * Decide whether a bounty matches a given UI filter for THIS dev.
  *
- *   - "open"      → on-chain state Open && !closed_by_user. Both
- *                    `bounty.status === "open"` and `"reviewing"`
- *                    encode that — only their submission count differs.
- *   - "reviewing" → has at least one submission to look at.
- *   - "approved"  → resolved on-chain (winner picked, paid out).
+ * The filters are dev-perspective, not bounty-perspective: a bounty
+ * the dev already submitted a PR to is "reviewing" for them and no
+ * longer "open", regardless of whether the on-chain bounty itself is
+ * still accepting new PRs from other devs. (The company-side analogue
+ * uses different rules — see `app/app/company/page.tsx`.)
+ *
+ *   - "open"      → on-chain Open (or has-submissions Reviewing) AND
+ *                   THIS dev has NOT submitted yet. The bounty is
+ *                   actionable for them.
+ *   - "reviewing" → this dev submitted, decision still pending. Stays
+ *                   here regardless of how many other PRs landed.
+ *   - "approved"  → bounty resolved on-chain (any winner picked,
+ *                   payout cleared). Includes losses; the dev's own
+ *                   personal "won/lost" view lives in the profile
+ *                   submissions list (GHB-90 / 91).
  */
-function matchesStatusFilter(b: Bounty, filter: StatusFilter): boolean {
+function matchesStatusFilter(
+  b: Bounty,
+  filter: StatusFilter,
+  hasSubmitted: boolean,
+): boolean {
   switch (filter) {
     case "open":
-      return b.status === "open" || b.status === "reviewing";
+      return (
+        (b.status === "open" || b.status === "reviewing") && !hasSubmitted
+      );
     case "reviewing":
-      return (b.submissionCount ?? 0) > 0;
+      return (
+        hasSubmitted &&
+        (b.status === "open" || b.status === "reviewing")
+      );
     case "approved":
       return b.status === "approved" || b.status === "paid";
     default:
@@ -45,6 +67,8 @@ export default function DevDashboard() {
 
 function DevDashboardInner() {
   const { user } = useAuth();
+  const privyMode = usePrivyBackend;
+  const { wallets } = useWallets();
   const [tick, setTick] = useState(0);
   const [search, setSearch] = useState("");
   const [companyId, setCompanyId] = useState<string>("all");
@@ -55,12 +79,53 @@ function DevDashboardInner() {
   const [submittedBountyIds, setSubmittedBountyIds] = useState<Set<string>>(
     new Set(),
   );
+  // Live SOL balance for the dev's Privy wallet — surfaced in the
+  // wallet pill so the dev can SEE the bounty payout land after a
+  // company picks them as winner. Re-fetched on `tick` bumps so the
+  // user can refresh by triggering a state change anywhere (modal
+  // close, deposit, etc.).
+  const [balanceSol, setBalanceSol] = useState<number | null>(null);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [depositOpen, setDepositOpen] = useState(false);
+
+  // The dev's wallet — Privy embedded in real mode, mock store wallet
+  // for the legacy localStorage flow.
+  const walletAddress = privyMode
+    ? wallets[0]?.address ?? null
+    : user?.wallet ?? null;
 
   useEffect(() => {
     const h = () => setTick((t) => t + 1);
     window.addEventListener("storage", h);
     return () => window.removeEventListener("storage", h);
   }, []);
+
+  // Balance fetch — separate effect from the marketplace fetch because
+  // the wallet address can change without the dev's submissions
+  // changing (and vice-versa). Hits the RPC directly; the value
+  // matters at click-time.
+  useEffect(() => {
+    if (!walletAddress) {
+      setBalanceSol(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const conn = getConnection();
+        const lamports = await conn.getBalance(new PublicKey(walletAddress));
+        if (!cancelled) setBalanceSol(lamports / LAMPORTS_PER_SOL);
+      } catch (err) {
+        console.warn("[DevDashboard] balance fetch failed:", err);
+        if (!cancelled) setBalanceSol(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress, tick]);
+
+  const refreshAll = useCallback(() => setTick((t) => t + 1), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,21 +149,21 @@ function DevDashboardInner() {
     return m;
   }, [companies]);
 
-  // GHB-170: `bounty.status` already arrives as "reviewing" whenever
-  // any submission exists (the data fetcher backfills the count from the
-  // `submissions` table — see `countSubmissionsByIssuePda`). So the
-  // dev-side view doesn't need a client-side override anymore: their own
-  // submitted bounty shows up as "Reviewing" because there IS a
-  // submission for it, period.
+  // Per-dev filter: a bounty the dev already submitted to is treated
+  // as "reviewing" for them and disappears from "Open" — the bounty is
+  // no longer actionable on their side. Other devs may still see it as
+  // open. See `matchesStatusFilter` for the exact rules.
   //
-  // Filter behavior is intentionally non-exclusive: a bounty with one
-  // submission AND state=Open on-chain shows up under BOTH "Open"
-  // (still accepting new PRs) and "Reviewing" (has stuff to review).
-  // "Open" / "Reviewing" are different questions about the same
-  // bounty, not mutually exclusive lifecycle states.
+  // Tom's note (paraphrased): "if I as a dev already applied for a
+  // bounty, in my state of dev the bounty shouldn't appear in open,
+  // only in review. The company has different rules — they still see
+  // it as open until the max-submissions cap is hit (separate ticket)."
   const filtered = bounties.filter((b) => {
+    const submitted = submittedBountyIds.has(b.id);
     if (companyId !== "all" && b.companyId !== companyId) return false;
-    if (status !== "all" && !matchesStatusFilter(b, status)) return false;
+    if (status !== "all" && !matchesStatusFilter(b, status, submitted)) {
+      return false;
+    }
     if (search) {
       const s = search.toLowerCase();
       const hit =
@@ -140,6 +205,54 @@ function DevDashboardInner() {
           </div>
         </div>
       </section>
+
+      {/* Dev wallet pill — mirrors the company-side `CreateBountyForm`
+        * pill so the dev sees their live SOL balance + can move funds in
+        * and out without leaving the dashboard. The balance only shows
+        * here (the dev's own view); we do NOT expose it to companies in
+        * the submissions review modal. */}
+      {walletAddress && (
+        <section className="wallet-pill dev-wallet-pill">
+          <div className="wallet-pill-row">
+            <span className="wallet-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7h18v13H3z" />
+                <path d="M3 7l2-3h14l2 3" />
+                <circle cx="17" cy="13.5" r="1.5" />
+              </svg>
+            </span>
+            <code>{shortWallet(walletAddress)}</code>
+            <span className="wallet-status">
+              {balanceSol !== null ? `${balanceSol.toFixed(4)} SOL` : "—"}
+            </span>
+          </div>
+          <div className="wallet-pill-actions">
+            <button
+              type="button"
+              className="wallet-action wallet-deposit"
+              onClick={() => setDepositOpen(true)}
+              disabled={!privyMode}
+              title="Receive SOL into your Privy wallet"
+            >
+              Deposit
+            </button>
+            <button
+              type="button"
+              className="wallet-action wallet-withdraw"
+              onClick={() => setWithdrawOpen(true)}
+              disabled={
+                !privyMode ||
+                !wallets[0] ||
+                balanceSol === null ||
+                balanceSol <= 0
+              }
+              title="Send SOL from your Privy wallet to an external address"
+            >
+              Withdraw
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="dash-toolbar tight">
         <div className="search-wrap">
@@ -232,6 +345,35 @@ function DevDashboardInner() {
           }}
         />
       )}
+
+      {withdrawOpen && wallets[0] && (
+        <WithdrawModal
+          wallet={wallets[0]}
+          balanceSol={balanceSol}
+          onClose={() => setWithdrawOpen(false)}
+          onWithdrawn={refreshAll}
+        />
+      )}
+
+      {depositOpen && walletAddress && (
+        <DepositModal
+          walletAddress={walletAddress}
+          // Hardcoded for MVP — we're locked to devnet via the Privy
+          // chain config; surface the explicit cluster so the user
+          // doesn't dust mainnet SOL into the wrong wallet.
+          network="Solana Devnet"
+          onClose={() => setDepositOpen(false)}
+          onRefresh={() => {
+            setDepositOpen(false);
+            refreshAll();
+          }}
+        />
+      )}
     </div>
   );
+}
+
+function shortWallet(w: string): string {
+  if (w.length < 12) return w;
+  return `${w.slice(0, 6)}…${w.slice(-4)}`;
 }
