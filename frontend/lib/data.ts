@@ -18,7 +18,14 @@
  *   `submissions` + `submission_meta` (+ join through `issues` for bountyId).
  */
 
-import type { Bounty, BountyStatus, Company, Dev, Submission } from "./types";
+import type {
+  Bounty,
+  BountyStatus,
+  Company,
+  Dev,
+  Submission,
+  SubmissionStatus,
+} from "./types";
 import { useSupabaseBackend, usePrivyBackend } from "./auth-context";
 
 /**
@@ -394,8 +401,27 @@ function parseGithubPrUrl(url: string): { prRepo: string; prNumber: number } {
   return { prRepo: m[1], prNumber: Number(m[2]) };
 }
 
-function rowToSubmission(row: SubmissionRow, bountyId: string): Submission {
+/** GHB-84 review shape returned from `submission_reviews`. Optional —
+ * passing `null` (no row in the table) means "not decided yet". */
+type SubmissionReviewRow = {
+  rejected: boolean;
+  reject_reason: string | null;
+};
+
+function rowToSubmission(
+  row: SubmissionRow,
+  bountyId: string,
+  review?: SubmissionReviewRow | null,
+): Submission {
   const { prRepo, prNumber } = parseGithubPrUrl(row.pr_url);
+  // Status precedence: on-chain Winner > off-chain Rejected > Pending.
+  // The on-chain `state === "winner"` only flips after `resolve_bounty`
+  // confirms; if the relayer-mirror lag matters, the company-side
+  // `recordWinnerOnchain` already nudges the row.
+  let status: SubmissionStatus = "pending";
+  if (row.state === "winner") status = "accepted";
+  else if (review?.rejected) status = "rejected";
+
   return {
     id: row.id,
     bountyId,
@@ -404,7 +430,11 @@ function rowToSubmission(row: SubmissionRow, bountyId: string): Submission {
     prRepo,
     prNumber,
     note: row.submission_meta?.note ?? undefined,
-    status: row.state === "winner" ? "accepted" : "pending",
+    status,
+    rejectReason:
+      review?.rejected && review.reject_reason
+        ? review.reject_reason
+        : undefined,
     createdAt: new Date(row.created_at).getTime(),
   };
 }
@@ -484,8 +514,36 @@ export async function fetchSubmissionsByDev(
   const rows = data ?? [];
   const pdas = Array.from(new Set(rows.map((r) => r.issue_pda)));
   const idByPda = await resolveIssueIdsByPda(supabase, pdas);
+  // GHB-84: hydrate the company's review decision so the dev sees the
+  // "Rejected" status + feedback on their own submissions list. The
+  // submission_reviews table isn't in the generated db.types.ts —
+  // bypass the typed builder via `as never` (same pattern as the
+  // company-side fetcher and `evaluations`).
+  const subIds = rows.map((r) => r.id);
+  const reviewById = new Map<string, SubmissionReviewRow>();
+  if (subIds.length > 0) {
+    const { data: reviews } = await supabase
+      .from("submission_reviews" as never)
+      .select("submission_id, rejected, reject_reason")
+      .in("submission_id", subIds);
+    const reviewRows = (reviews as unknown as Array<{
+      submission_id: string;
+      rejected: boolean;
+      reject_reason: string | null;
+    }>) ?? [];
+    for (const r of reviewRows) {
+      reviewById.set(r.submission_id, {
+        rejected: r.rejected,
+        reject_reason: r.reject_reason,
+      });
+    }
+  }
   return rows.map((row) =>
-    rowToSubmission(row, idByPda.get(row.issue_pda) ?? ""),
+    rowToSubmission(
+      row,
+      idByPda.get(row.issue_pda) ?? "",
+      reviewById.get(row.id) ?? null,
+    ),
   );
 }
 

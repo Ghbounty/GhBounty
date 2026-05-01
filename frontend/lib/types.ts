@@ -87,5 +87,12 @@ export type Submission = {
   prNumber: number;
   note?: string;
   status: SubmissionStatus;
+  /**
+   * Off-chain feedback the company wrote when rejecting this submission
+   * (GHB-84). Only populated when `status === "rejected"`. Sourced from
+   * the `submission_reviews` table; mirrors `submission_reviews.reject_reason`.
+   * Empty string is normalized to undefined upstream.
+   */
+  rejectReason?: string;
   createdAt: number;
 };

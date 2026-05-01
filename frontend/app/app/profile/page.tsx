@@ -474,6 +474,17 @@ function SubmissionRow({
           <span className="submission-note">“{submission.note}”</span>
         )}
       </div>
+      {submission.status === "rejected" && (
+        <div className="submission-reject-feedback">
+          <span className="submission-reject-feedback-label">
+            Feedback from the company
+          </span>
+          <p>
+            {submission.rejectReason ??
+              "No reason provided."}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
