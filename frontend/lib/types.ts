@@ -32,10 +32,20 @@ export type BountyStatus = "open" | "reviewing" | "approved" | "rejected" | "pai
 export type ReleaseMode = "auto" | "assisted";
 
 export type Bounty = {
+  /**
+   * Internal identifier. In the real Supabase backend this is `issues.id`
+   * (a UUID); in the localStorage mock it's the bounty PDA. Always usable
+   * as a stable React key + URL slug, never as a Solana address.
+   */
   id: string;
-  /** On-chain PDA of the escrow account, base58. Optional because mock
-   * data and historical rows may not have it surfaced through `data.ts`.
-   * Required to build the `cancel_bounty` instruction. */
+  /**
+   * On-chain bounty PDA (base58). Required to call `submit_solution` /
+   * `resolve_bounty` / `cancel_bounty` against the right account.
+   *
+   * Optional only because the localStorage mock used to overload `id`
+   * with the PDA — old mock rows survive without this field. In every
+   * Supabase-backed path it's set.
+   */
   pda?: string;
   companyId: string;
   repo: string;

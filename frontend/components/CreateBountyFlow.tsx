@@ -19,7 +19,7 @@
  * intentionally *do not* fall back to localStorage — if the chain or DB
  * rejects, the bounty doesn't exist anywhere and the form stays correct.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import bs58 from "bs58";
 import {
   Connection,
@@ -60,6 +60,23 @@ type Step = "confirm" | "processing" | "success" | "error";
 const SOLANA_NATIVE_MINT = "11111111111111111111111111111111";
 const CHAIN_ID = "solana-devnet";
 
+/**
+ * GHB-169: indices into the controlled-mode `<ProcessingSteps>` list. The
+ * cursor advances only when the matching await resolves, so the UI no
+ * longer pretends the flow is further along than it actually is.
+ */
+const PHASE_BUILD = 0;
+const PHASE_SIGN = 1;
+const PHASE_CONFIRM = 2;
+const PHASE_INDEX = 3;
+
+const PROCESSING_STEPS = [
+  { id: "build", label: "Building transaction" },
+  { id: "sign", label: "Signing in your wallet" },
+  { id: "confirm", label: "Confirming on Solana devnet" },
+  { id: "index", label: "Indexing in Supabase" },
+];
+
 export function CreateBountyFlow({
   company,
   data,
@@ -75,6 +92,9 @@ export function CreateBountyFlow({
   const [error, setError] = useState<string | null>(null);
   const [txSig, setTxSig] = useState<string | null>(null);
   const [bountyPda, setBountyPda] = useState<string | null>(null);
+  // GHB-169: drive `<ProcessingSteps>` from the real flow.
+  const [phase, setPhase] = useState<number>(PHASE_BUILD);
+  const [phaseError, setPhaseError] = useState(false);
   const sentRef = useRef(false);
 
   const privyMode = usePrivyBackend;
@@ -113,6 +133,9 @@ export function CreateBountyFlow({
     if (sentRef.current) return;
     sentRef.current = true;
 
+    setPhase(PHASE_BUILD);
+    setPhaseError(false);
+
     try {
       if (!privyMode) {
         throw new Error(
@@ -130,7 +153,7 @@ export function CreateBountyFlow({
       const creator = new PublicKey(walletAddress);
       const amountLamports = BigInt(Math.round(data.amount * LAMPORTS_PER_SOL));
 
-      // 1. Build the unsigned instruction.
+      // PHASE_BUILD: encode the instruction.
       const { ix, bountyPda: pda, bountyId } = await buildCreateBountyIx(
         {
           creator,
@@ -140,19 +163,22 @@ export function CreateBountyFlow({
         connection,
       );
 
-      // 2. Wrap in a Transaction with a fresh blockhash.
-      const { blockhash } = await connection.getLatestBlockhash("confirmed");
+      // Wrap in a Transaction with a fresh blockhash. Privy's
+      // `signAndSendTransaction` wants the serialized wire format
+      // *before* signing — `requireAllSignatures: false` lets us
+      // serialize an unsigned tx (Privy's wallet adds the signature).
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
+        "confirmed",
+      );
       const tx = new Transaction({
         feePayer: creator,
         recentBlockhash: blockhash,
       }).add(ix);
-
-      // Privy's signAndSendTransaction wants the serialized wire format
-      // *before* signing. `requireAllSignatures: false` lets us serialize
-      // an unsigned tx (Privy's wallet adds the signature itself).
       const serialized = tx.serialize({ requireAllSignatures: false });
 
-      // 3. Hand off to Privy — pops the wallet UI.
+      // PHASE_SIGN: pops Privy's wallet UI. This is the longest step in
+      // practice (waiting on the user to confirm).
+      setPhase(PHASE_SIGN);
       const { signature } = await signAndSendTransaction({
         transaction: serialized,
         wallet,
@@ -162,14 +188,25 @@ export function CreateBountyFlow({
       setTxSig(sig);
       setBountyPda(pda.toBase58());
 
-      // 4. Wait for confirmation. `confirmed` is enough — `finalized`
-      // would be safer but adds ~10s of UX wait.
-      await connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight: (await connection.getLatestBlockhash("confirmed")).lastValidBlockHeight },
+      // PHASE_CONFIRM: wait for the cluster. `confirmed` is enough on
+      // devnet — `finalized` would be safer but adds ~10s of UX wait.
+      // CRITICAL: `confirmTransaction` resolves even when the tx reverted
+      // (program error). The failure is in `value.err`, not thrown. Check
+      // it explicitly so the modal stops at this step instead of pinning
+      // the failure on the DB insert with a confusing message.
+      setPhase(PHASE_CONFIRM);
+      const confirmation = await connection.confirmTransaction(
+        { signature: sig, blockhash, lastValidBlockHeight },
         "confirmed",
       );
+      if (confirmation.value.err) {
+        throw new Error(
+          `Bounty creation reverted on-chain: ${JSON.stringify(confirmation.value.err)}.`,
+        );
+      }
 
-      // 5. Persist the off-chain rows.
+      // PHASE_INDEX: persist the off-chain rows.
+      setPhase(PHASE_INDEX);
       const supabase = createClient();
       await insertIssueAndMeta(supabase, {
         chainId: CHAIN_ID,
@@ -188,12 +225,13 @@ export function CreateBountyFlow({
         createdByUserId: user.id,
       });
 
-      // 6. Build a Bounty for the legacy localStorage-based dashboard so
+      // Build a Bounty for the legacy localStorage-based dashboard so
       // the user sees their new bounty immediately. The Supabase-backed
       // listing lands in GHB-81; until then we mirror the row to
       // localStorage so the existing UI keeps working.
       const bounty: Bounty = {
         id: pda.toBase58(),
+        pda: pda.toBase58(),
         companyId: company.id,
         repo: data.repo,
         issueNumber: data.issueNumber,
@@ -212,9 +250,11 @@ export function CreateBountyFlow({
         console.warn("[CreateBountyFlow] localStorage mirror failed:", mirrorErr);
       }
       onCreated(bounty);
+      setPhase(PROCESSING_STEPS.length);
       setStep("success");
     } catch (err) {
       console.error("[CreateBountyFlow] failed:", err);
+      setPhaseError(true);
       setError(err instanceof Error ? err.message : "Bounty creation failed.");
       setStep("error");
       sentRef.current = false; // allow retry
@@ -222,10 +262,14 @@ export function CreateBountyFlow({
   }
 
   // Trigger the real flow when the user moves into the processing step.
+  // The first setState inside `runRealFlow` is gated behind an `await` and
+  // a `try/catch`, so the cascade-render concern of `set-state-in-effect`
+  // doesn't apply — the lint rule can't see across the async boundary.
+  /* eslint-disable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect */
   useEffect(() => {
     if (step === "processing") void runRealFlow();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
+  /* eslint-enable react-hooks/exhaustive-deps, react-hooks/set-state-in-effect */
 
   function handleDone() {
     onClose();
@@ -233,6 +277,8 @@ export function CreateBountyFlow({
 
   function handleRetry() {
     setError(null);
+    setPhase(PHASE_BUILD);
+    setPhaseError(false);
     setStep("confirm");
   }
 
@@ -316,16 +362,9 @@ export function CreateBountyFlow({
             </div>
 
             <ProcessingSteps
-              steps={[
-                { id: "build", label: "Building transaction", duration: 600 },
-                { id: "sign", label: "Signing in your wallet", duration: 1200 },
-                { id: "confirm", label: "Confirming on Solana devnet", duration: 1500 },
-                { id: "index", label: "Indexing in Supabase", duration: 600 },
-              ]}
-              onComplete={() => {
-                /* Animation is purely visual — the real flow is driven
-                   by `runRealFlow()` which transitions the step itself. */
-              }}
+              steps={PROCESSING_STEPS}
+              currentStep={phase}
+              error={phaseError}
             />
 
             <p className="modal-note">
@@ -389,6 +428,15 @@ export function CreateBountyFlow({
               <div className="eyebrow">Failed</div>
               <h2 className="modal-title">Couldn&apos;t create the bounty</h2>
             </div>
+
+            {/* Re-render the steps with the failing phase marked in red so
+                the user sees *which* step blew up before reading the
+                message. */}
+            <ProcessingSteps
+              steps={PROCESSING_STEPS}
+              currentStep={phase}
+              error
+            />
 
             <div className="form-error">{error}</div>
 
