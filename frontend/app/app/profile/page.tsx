@@ -485,12 +485,16 @@ function SubmissionRow({
           </p>
         </div>
       )}
-      {submission.status === "accepted" && submission.approvalFeedback && (
+      {submission.status === "accepted" && (
         <div className="submission-approve-feedback">
           <span className="submission-approve-feedback-label">
-            Note from the company
+            ★ You won this bounty
           </span>
-          <p>{submission.approvalFeedback}</p>
+          <p>
+            {submission.approvalFeedback
+              ? submission.approvalFeedback
+              : "No specific note from the company. The bounty payout has been released to your wallet."}
+          </p>
         </div>
       )}
     </div>
