@@ -403,9 +403,11 @@ function parseGithubPrUrl(url: string): { prRepo: string; prNumber: number } {
 
 /** GHB-84 + GHB-83 follow-up review shape from `submission_reviews`.
  * Optional — passing `null` (no row in the table) means "not decided
- * yet". `approval_feedback` was added in migration 0011. */
+ * yet". `approval_feedback` was added in migration 0011, `approved` in
+ * 0012. */
 type SubmissionReviewRow = {
   rejected: boolean;
+  approved: boolean;
   reject_reason: string | null;
   approval_feedback: string | null;
 };
@@ -416,12 +418,17 @@ function rowToSubmission(
   review?: SubmissionReviewRow | null,
 ): Submission {
   const { prRepo, prNumber } = parseGithubPrUrl(row.pr_url);
-  // Status precedence: on-chain Winner > off-chain Rejected > Pending.
-  // The on-chain `state === "winner"` only flips after `resolve_bounty`
-  // confirms; if the relayer-mirror lag matters, the company-side
-  // `recordWinnerOnchain` already nudges the row.
+  // Status precedence: Accepted > Rejected > Pending.
+  //
+  // "Accepted" comes from EITHER the on-chain mirror (relayer caught up
+  // to `submissions.state = 'winner'`) OR the off-chain
+  // `submission_reviews.approved` flag — set immediately when the
+  // company picks the winner, so the UI reflects it without relayer
+  // lag (devnet runs without a relayer hit this).
+  const onchainWinner = row.state === "winner";
+  const offchainApproved = review?.approved === true;
   let status: SubmissionStatus = "pending";
-  if (row.state === "winner") status = "accepted";
+  if (onchainWinner || offchainApproved) status = "accepted";
   else if (review?.rejected) status = "rejected";
 
   return {
@@ -530,17 +537,21 @@ export async function fetchSubmissionsByDev(
   if (subIds.length > 0) {
     const { data: reviews } = await supabase
       .from("submission_reviews" as never)
-      .select("submission_id, rejected, reject_reason, approval_feedback")
+      .select(
+        "submission_id, rejected, approved, reject_reason, approval_feedback",
+      )
       .in("submission_id", subIds);
     const reviewRows = (reviews as unknown as Array<{
       submission_id: string;
       rejected: boolean;
+      approved: boolean;
       reject_reason: string | null;
       approval_feedback: string | null;
     }>) ?? [];
     for (const r of reviewRows) {
       reviewById.set(r.submission_id, {
         rejected: r.rejected,
+        approved: r.approved,
         reject_reason: r.reject_reason,
         approval_feedback: r.approval_feedback,
       });
@@ -609,18 +620,24 @@ export type EnrichedSubmission = {
   /** `score < bounty.rejectThreshold` — only meaningful when scored. */
   recommendedReject: boolean;
   /**
-   * Company-side review decision (GHB-84). Mirrors the
-   * `submission_reviews` row when present; `null` otherwise — meaning the
-   * company hasn't acted on this submission yet.
+   * Company-side review decision (GHB-84 + GHB-83 follow-up). Mirrors
+   * the `submission_reviews` row when present; `null` otherwise —
+   * meaning the company hasn't acted on this submission yet.
    *
    * `rejected: true` is a soft, off-chain decision: the dev's submission
    * is hidden from the active review queue, but the on-chain Submission
-   * account stays in `Pending` / `Scored`. Picking the winner pays out
-   * via `resolve_bounty` regardless of the rejected losers.
+   * account stays in `Pending` / `Scored`.
+   *
+   * `approved: true` is the off-chain "this submission won" mirror,
+   * written immediately by `recordWinnerOnchain` so the UI doesn't have
+   * to wait for the relayer to flip `submissions.state = 'winner'`.
+   * Read-side: either signal flips the card into the Winner state.
    */
   review: {
     rejected: boolean;
+    approved: boolean;
     rejectReason: string | null;
+    approvalFeedback: string | null;
     decidedAt: number | null;
   } | null;
 };
@@ -746,7 +763,9 @@ export async function fetchSubmissionsForBountyDetailed(
       .order("created_at", { ascending: false }),
     supabase
       .from("submission_reviews" as never)
-      .select("submission_id, rejected, reject_reason, decided_at")
+      .select(
+        "submission_id, rejected, approved, reject_reason, approval_feedback, decided_at",
+      )
       .in("submission_id", subIds),
   ]);
   const evalRows = (evalQ.data as unknown as Array<{
@@ -771,14 +790,18 @@ export async function fetchSubmissionsForBountyDetailed(
   const reviewRows = (reviewQ.data as unknown as Array<{
     submission_id: string;
     rejected: boolean;
+    approved: boolean;
     reject_reason: string | null;
+    approval_feedback: string | null;
     decided_at: string;
   }>) ?? [];
   const reviewById = new Map<string, EnrichedSubmission["review"]>();
   for (const r of reviewRows) {
     reviewById.set(r.submission_id, {
       rejected: r.rejected,
+      approved: r.approved,
       rejectReason: r.reject_reason,
+      approvalFeedback: r.approval_feedback,
       decidedAt: r.decided_at ? new Date(r.decided_at).getTime() : null,
     });
   }

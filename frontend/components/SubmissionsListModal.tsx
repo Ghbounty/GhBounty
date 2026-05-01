@@ -79,7 +79,11 @@ export function SubmissionsListModal({
   // A bounty is "settled" once any submission is the winner OR the
   // bounty's status reflects a payout/cancellation. Both action buttons
   // disappear from every card in that case — no second pick allowed.
-  const hasWinner = items?.some((s) => s.state === "winner") ?? false;
+  // Same on-chain-OR-off-chain check as `isWinner` below.
+  const hasWinner =
+    items?.some(
+      (s) => s.state === "winner" || s.review?.approved === true,
+    ) ?? false;
   const settledStatus =
     bounty.status === "approved" ||
     bounty.status === "paid" ||
@@ -213,7 +217,12 @@ function SubmissionCard({
 }) {
   const displayName = s.dev.username || s.dev.email || "Anonymous dev";
   const score = s.evaluation?.score ?? null;
-  const isWinner = s.state === "winner";
+  // Winner = on-chain mirror caught up OR we have the off-chain
+  // approved flag from `submission_reviews` (set immediately by
+  // `recordWinnerOnchain`). The off-chain flag exists to bridge the
+  // relayer lag on devnet so the Winner badge shows up right after
+  // the company picks.
+  const isWinner = s.state === "winner" || (s.review?.approved ?? false);
   const isRejected = s.review?.rejected ?? false;
 
   // Decided submissions don't get action buttons even when the bounty is

@@ -110,22 +110,32 @@ export type RecordWinnerParams = {
 };
 
 /**
- * Best-effort post-`resolve_bounty` mirror update. We try to:
+ * Best-effort post-`resolve_bounty` mirror update. We do two things:
  *
- *   1. Mark the winning submission's `tx_hash` so the dev-side view shows
- *      the payout tx without waiting for the relayer to backfill.
- *   2. Flip `bounty_meta.closed_by_user = true` so the issue drops out of
- *      "Open" filters in the marketplace immediately.
+ *   1. Persist tx_hash on the winning submission so the dev's payout
+ *      reference shows up immediately.
  *
- * The on-chain `submissions.state = 'winner'` flip is RLS-restricted
- * (mirror table — only the relayer can write) so we deliberately don't
- * attempt it here. The relayer's `resolve_bounty` watcher will catch up
- * within the polling interval; in the meantime the bounty's status
- * derivation falls back to "approved" via `closed_by_user`.
+ *   2. Upsert the off-chain decision into `submission_reviews` with
+ *      `approved=true` (and optional feedback). This is what unblocks
+ *      the dev/company UI from waiting on the relayer to mirror
+ *      `submissions.state = 'winner'`. Read-side precedence:
+ *        on-chain Winner OR off-chain approved → "accepted" / Winner badge.
+ *      Either signal is sufficient.
  *
- * Returns silently on every step's failure — the on-chain tx already
- * succeeded, so showing the user a "DB sync failed" error here would be
- * misleading. We log + move on.
+ * What we deliberately DON'T do:
+ *   - Set `bounty_meta.closed_by_user = true`. That field is the
+ *     "company manually cancelled the bounty" flag and `deriveStatus`
+ *     maps it to status="closed" — which is semantically wrong for a
+ *     resolved bounty. The relayer flips `issues.state` to "resolved"
+ *     when it catches up, which `deriveStatus` correctly maps to "paid".
+ *
+ *   - Update `submissions.state` directly. That's the on-chain mirror;
+ *     RLS forbids non-relayer writes. Off-chain `approved` is our
+ *     parallel signal.
+ *
+ * All branches are best-effort: log + move on. The on-chain tx already
+ * succeeded, so showing a "DB sync failed" error here would mislead the
+ * user into thinking the payout didn't happen.
  */
 export async function recordWinnerOnchain(
   supabase: DBClient,
@@ -144,26 +154,11 @@ export async function recordWinnerOnchain(
     console.warn("[recordWinnerOnchain:submissions]", err);
   }
 
-  // 2. Flip closed_by_user on bounty_meta.
-  try {
-    const { error: metaErr } = await supabase
-      .from("bounty_meta")
-      .update({ closed_by_user: true })
-      .eq("issue_id", p.bountyId);
-    if (metaErr) {
-      console.warn("[recordWinnerOnchain:bounty_meta]", metaErr);
-    }
-  } catch (err) {
-    console.warn("[recordWinnerOnchain:bounty_meta]", err);
-  }
-
-  // 3. Persist optional approval feedback. Skipped when the company
-  //    left the textarea blank — no need to insert a near-empty row
-  //    just to record the timestamp. Best-effort like the other
-  //    branches: a failed RLS check or transient error logs and
-  //    moves on rather than masking the on-chain success.
-  const trimmed = p.approvalFeedback?.trim();
-  if (trimmed && trimmed.length > 0 && p.reviewerUserId) {
+  // 2. Upsert submission_reviews with approved=true (always, even
+  //    when there's no feedback — the flag is what the dev/company UI
+  //    reads as the off-chain "this submission won" signal).
+  if (p.reviewerUserId) {
+    const trimmed = p.approvalFeedback?.trim() ?? "";
     try {
       const { error: revErr } = await supabase
         .from("submission_reviews" as never)
@@ -171,7 +166,8 @@ export async function recordWinnerOnchain(
           {
             submission_id: p.winnerSubmissionId,
             rejected: false,
-            approval_feedback: trimmed,
+            approved: true,
+            approval_feedback: trimmed.length > 0 ? trimmed : null,
             decided_by: p.reviewerUserId,
             decided_at: new Date().toISOString(),
           } as never,

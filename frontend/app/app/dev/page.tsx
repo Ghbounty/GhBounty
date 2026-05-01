@@ -18,23 +18,26 @@ const STATUS_FILTERS: StatusFilter[] = ["all", "open", "reviewing", "approved"];
  * The filters are dev-perspective, not bounty-perspective: a bounty
  * the dev already submitted a PR to is "reviewing" for them and no
  * longer "open", regardless of whether the on-chain bounty itself is
- * still accepting new PRs from other devs. (The company-side analogue
- * uses different rules — see `app/app/company/page.tsx`.)
+ * still accepting new PRs from other devs. Likewise, "approved" tracks
+ * the dev's OWN win, not whether someone else won the same bounty.
  *
  *   - "open"      → on-chain Open (or has-submissions Reviewing) AND
  *                   THIS dev has NOT submitted yet. The bounty is
  *                   actionable for them.
- *   - "reviewing" → this dev submitted, decision still pending. Stays
- *                   here regardless of how many other PRs landed.
- *   - "approved"  → bounty resolved on-chain (any winner picked,
- *                   payout cleared). Includes losses; the dev's own
- *                   personal "won/lost" view lives in the profile
- *                   submissions list (GHB-90 / 91).
+ *   - "reviewing" → this dev submitted, decision still pending. Drops
+ *                   out once the dev wins (Approved) or is rejected.
+ *   - "approved"  → THIS dev's submission won (review.approved or
+ *                   on-chain Winner). The Supabase relayer mirror is
+ *                   slow on devnet, so we rely on the off-chain
+ *                   `submission_reviews.approved` flag set immediately
+ *                   by `recordWinnerOnchain`.
  */
 function matchesStatusFilter(
   b: Bounty,
   filter: StatusFilter,
   hasSubmitted: boolean,
+  hasApproved: boolean,
+  hasRejected: boolean,
 ): boolean {
   switch (filter) {
     case "open":
@@ -44,10 +47,12 @@ function matchesStatusFilter(
     case "reviewing":
       return (
         hasSubmitted &&
+        !hasApproved &&
+        !hasRejected &&
         (b.status === "open" || b.status === "reviewing")
       );
     case "approved":
-      return b.status === "approved" || b.status === "paid";
+      return hasApproved;
     default:
       return true;
   }
@@ -141,8 +146,13 @@ function DevDashboardInner() {
   // it as open until the max-submissions cap is hit (separate ticket)."
   const filtered = bounties.filter((b) => {
     const submitted = submittedBountyIds.has(b.id);
+    const approved = approvedBountyIds.has(b.id);
+    const rejected = rejectedBountyIds.has(b.id);
     if (companyId !== "all" && b.companyId !== companyId) return false;
-    if (status !== "all" && !matchesStatusFilter(b, status, submitted)) {
+    if (
+      status !== "all" &&
+      !matchesStatusFilter(b, status, submitted, approved, rejected)
+    ) {
       return false;
     }
     if (search) {
