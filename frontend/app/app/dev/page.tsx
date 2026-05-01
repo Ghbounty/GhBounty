@@ -60,6 +60,12 @@ function DevDashboardInner() {
     return m;
   }, [companies]);
 
+  // GHB-170: `bounty.status` already arrives as "reviewing" whenever
+  // any submission exists (the data fetcher backfills the count from the
+  // `submissions` table — see `countSubmissionsByIssuePda`). So the
+  // dev-side view doesn't need a client-side override anymore: their own
+  // submitted bounty shows up as "Reviewing" because there IS a
+  // submission for it, period.
   const filtered = bounties.filter((b) => {
     if (status !== "all" && b.status !== status) return false;
     if (companyId !== "all" && b.companyId !== companyId) return false;

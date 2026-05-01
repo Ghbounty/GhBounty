@@ -232,11 +232,17 @@ function deriveStatus(
  */
 const SOL_DECIMALS = 9;
 
-function rowToBounty(row: IssueRow): Bounty {
+function rowToBounty(row: IssueRow, submissionCount?: number): Bounty {
   const { repo, issueNumber } = parseGithubIssueUrl(row.github_issue_url);
   const meta = row.bounty_meta;
   const amountRaw =
     typeof row.amount === "string" ? Number(row.amount) : row.amount;
+  // Prefer the live count from the `submissions` table when the caller
+  // gives us one — `issues.submission_count` lags forever because the
+  // frontend can't UPDATE it (creator-only RLS). Fall back to the
+  // mirror column for callers that haven't joined yet (mock data,
+  // single-row fetch where the join would be wasteful).
+  const effectiveCount = submissionCount ?? row.submission_count;
   return {
     id: row.id,
     pda: row.pda,
@@ -249,11 +255,44 @@ function rowToBounty(row: IssueRow): Bounty {
     status: deriveStatus(
       row.state,
       meta?.closed_by_user ?? false,
-      row.submission_count,
+      effectiveCount,
     ),
     releaseMode: meta?.release_mode ?? "auto",
+    submissionCount: effectiveCount,
     createdAt: new Date(row.created_at).getTime(),
   };
+}
+
+/**
+ * Group-count of `submissions` rows by `issue_pda`. Used by the
+ * marketplace + company-dashboard fetchers to backfill a real
+ * submission count per bounty (rather than the stale
+ * `issues.submission_count` mirror).
+ *
+ * PostgREST has no direct `GROUP BY count(*)` over the REST surface, so
+ * we fetch the raw `issue_pda` values and tally in JS. For the
+ * dashboards' typical sizes (tens of bounties, low-hundreds of
+ * submissions) this is plenty cheap; revisit if it ever shows up in
+ * profiling.
+ */
+async function countSubmissionsByIssuePda(
+  supabase: ReturnType<typeof createClient>,
+  pdas: string[],
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (pdas.length === 0) return counts;
+  const { data, error } = await supabase
+    .from("submissions")
+    .select("issue_pda")
+    .in("issue_pda", pdas);
+  if (error) {
+    console.error("[countSubmissionsByIssuePda]", error);
+    return counts;
+  }
+  for (const row of data ?? []) {
+    counts.set(row.issue_pda, (counts.get(row.issue_pda) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export async function fetchBounties(): Promise<Bounty[]> {
@@ -270,7 +309,12 @@ export async function fetchBounties(): Promise<Bounty[]> {
     console.error("[fetchBounties]", error);
     return [];
   }
-  return (data ?? []).map(rowToBounty);
+  const rows = data ?? [];
+  const counts = await countSubmissionsByIssuePda(
+    supabase,
+    rows.map((r) => r.pda),
+  );
+  return rows.map((row) => rowToBounty(row, counts.get(row.pda) ?? 0));
 }
 
 export async function fetchBounty(id: string): Promise<Bounty | null> {
@@ -310,9 +354,14 @@ export async function fetchBountiesByCompany(
   }
   // PostgREST inner-filter on a related table doesn't always exclude rows
   // whose meta is null — filter client-side as a belt-and-suspenders.
-  return (data ?? [])
-    .filter((row) => row.bounty_meta?.created_by_user_id === companyId)
-    .map(rowToBounty);
+  const ownRows = (data ?? []).filter(
+    (row) => row.bounty_meta?.created_by_user_id === companyId,
+  );
+  const counts = await countSubmissionsByIssuePda(
+    supabase,
+    ownRows.map((r) => r.pda),
+  );
+  return ownRows.map((row) => rowToBounty(row, counts.get(row.pda) ?? 0));
 }
 
 /* ---------------------------------------------------------------- */

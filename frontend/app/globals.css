@@ -1196,6 +1196,20 @@ section { position: relative; padding: 120px 40px; }
 .status-badge.status-paid { color: var(--text-dim); background: rgba(255,255,255,0.02); }
 .status-badge.status-closed { color: var(--text-muted); background: rgba(255,255,255,0.02); border-color: var(--border); }
 
+/* Subtle counter showing how many PRs have been submitted to a bounty.
+   Sits next to the StatusBadge in the card header so the company can
+   see at-a-glance which bounties have queued submissions to review. */
+.submission-count-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: .08em;
+  border: 1px solid rgba(254, 188, 46, 0.25);
+  background: rgba(254, 188, 46, 0.06);
+  color: #FEBC2E;
+}
+.submission-count-pill svg { opacity: 0.8; }
+
 .bounty-card-head-right {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
 }

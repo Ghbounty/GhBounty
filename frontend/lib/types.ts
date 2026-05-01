@@ -55,6 +55,17 @@ export type Bounty = {
   amountUsdc: number;
   status: BountyStatus;
   releaseMode: ReleaseMode;
+  /**
+   * Number of submissions tied to this bounty (counted from the
+   * `submissions` table, not `issues.submission_count` — that mirror
+   * column never gets updated client-side because RLS forbids non-creator
+   * UPDATEs on `issues`).
+   *
+   * Used by the company dashboard ("3 PRs") and to derive the
+   * "reviewing" status. Optional for backwards compatibility with mock
+   * data; treat missing as 0.
+   */
+  submissionCount?: number;
   createdAt: number;
 };
 
