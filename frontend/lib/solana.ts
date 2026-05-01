@@ -357,3 +357,59 @@ export async function buildSubmitSolutionIx(
 
   return { submissionPda, submissionIndex, ix };
 }
+
+/* ================================================================
+ * GHB-83: resolve_bounty helpers (company picks the winner)
+ * ================================================================ */
+
+export type ResolveBountyParams = {
+  /** Bounty creator (company). Program enforces `creator == bounty.creator`
+   * via `UnauthorizedCreator` — must match the on-chain creator pubkey. */
+  creator: PublicKey;
+  /** PDA of the bounty being resolved. */
+  bountyPda: PublicKey;
+  /** PDA of the chosen submission. The program validates
+   *  `submission.bounty == bounty.key()` (SubmissionMismatch) and that
+   *  `winner.key() == submission.solver` (also SubmissionMismatch). */
+  winningSubmissionPda: PublicKey;
+  /** Wallet receiving the escrow payout. Must equal the on-chain
+   *  `submission.solver` — i.e., the dev's solana address from
+   *  `submissions.solver` in Supabase (mirror) or read directly from the
+   *  Submission account. The UI passes `submissions.solver` since that's
+   *  the same value the program will compare against. */
+  winnerWallet: PublicKey;
+};
+
+/**
+ * Build the `resolve_bounty` instruction. The program transfers the entire
+ * escrow to `winner` and flips bounty.state → Resolved + submission.state →
+ * Winner, so a successful confirmation means the bounty is paid out.
+ *
+ * Constraints (program-side):
+ *   - bounty.state must be Open (otherwise BountyNotOpen)
+ *   - signer must equal bounty.creator (UnauthorizedCreator)
+ *   - winning_submission.bounty must equal bounty.key() (SubmissionMismatch)
+ *   - winner.key() must equal winning_submission.solver (SubmissionMismatch)
+ *
+ * Caller is responsible for:
+ *   1. Wrapping in a Transaction with a fresh blockhash.
+ *   2. Sending via the connected wallet (Privy embedded).
+ *   3. Awaiting confirmation and checking `value.err` (a revert resolves
+ *      successfully here without throwing).
+ *   4. Mirroring the off-chain state (issues.status, optional notification).
+ */
+export async function buildResolveBountyIx(
+  params: ResolveBountyParams,
+  connection: Connection = getConnection(),
+): Promise<TransactionInstruction> {
+  const program = getProgram(connection);
+  return program.methods
+    .resolveBounty()
+    .accountsStrict({
+      creator: params.creator,
+      bounty: params.bountyPda,
+      winningSubmission: params.winningSubmissionPda,
+      winner: params.winnerWallet,
+    })
+    .instruction();
+}

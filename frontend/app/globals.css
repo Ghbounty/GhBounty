@@ -660,6 +660,205 @@ section { position: relative; padding: 120px 40px; }
   box-shadow: 0 0 8px var(--accent);
   animation: pulse 2.2s ease-in-out infinite;
 }
+/* Live SOL balance shown inside the wallet chip, after the address.
+ * Separated from the address by a thin vertical bar so the eye treats
+ * it as a distinct field rather than part of the truncated string. */
+.wallet-btn-balance {
+  margin-left: 4px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(0, 229, 209, 0.35);
+  font-variant-numeric: tabular-nums;
+  font-size: 11.5px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* GHB-83+84: chip-sized Deposit / Withdraw next to the wallet pill in
+ * the header. Match the height/border-radius of `.wallet-btn.connected`
+ * so the row reads as one unit; they're noticeably smaller in width. */
+.wallet-chip {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color .12s, border-color .12s, color .12s, transform .08s;
+}
+.wallet-chip:hover:not(:disabled) { transform: translateY(-1px); }
+.wallet-chip:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.wallet-chip-deposit {
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+.wallet-chip-deposit:hover:not(:disabled) {
+  background: rgba(0, 229, 209, 0.12);
+}
+.wallet-chip-withdraw {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: #002a26;
+}
+.wallet-chip-withdraw:hover:not(:disabled) {
+  background: rgba(0, 229, 209, 0.85);
+}
+.wallet-chip-withdraw:disabled {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+
+/* ---- GHB-92: notifications bell + dropdown ---- */
+.notif-wrap { position: relative; display: inline-flex; }
+.notif-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease,
+    transform 120ms ease;
+}
+.notif-btn:hover {
+  background: rgba(0, 229, 209, 0.08);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.notif-btn.open {
+  background: rgba(0, 229, 209, 0.12);
+  border-color: var(--accent);
+}
+.notif-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ff5757;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 360px;
+  max-height: 480px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  z-index: 60;
+  overflow: hidden;
+}
+.notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.notif-panel-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+.notif-mark-all {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.notif-mark-all:hover { text-decoration: underline; }
+.notif-state {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.notif-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+.notif-list li { border-bottom: 1px solid var(--border); }
+.notif-list li:last-child { border-bottom: none; }
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+.notif-item:hover { background: rgba(255, 255, 255, 0.03); }
+.notif-item.unread { background: rgba(0, 229, 209, 0.04); }
+.notif-item.unread:hover { background: rgba(0, 229, 209, 0.08); }
+.notif-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 999px;
+}
+.notif-dot-approved { background: #4ade80; }
+.notif-dot-rejected { background: #ff5757; }
+.notif-dot-auto-rejected { background: #999; }
+.notif-dot-scored { background: var(--accent); }
+.notif-dot-info { background: #5fb6ff; }
+.notif-dot-resolved-other { background: #b89cff; }
+.notif-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.notif-title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--text);
+}
+.notif-excerpt {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
 
 /* ---- avatar ---- */
 .avatar { display: inline-block; flex-shrink: 0; }
@@ -1242,6 +1441,25 @@ section { position: relative; padding: 120px 40px; }
   color: var(--text-dim);
 }
 .submissions-meta-sep { opacity: 0.5; }
+/* GHB-85: subdued count of hidden auto-rejected submissions inline
+ * with the PR count, plus the toggle that flips them back into the
+ * list. The toggle reads as a link rather than a chip — it's a
+ * triage tool, not a primary action. */
+.submissions-meta-aux { opacity: 0.6; text-transform: none; letter-spacing: 0; }
+.submissions-toggle-auto {
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.submissions-toggle-auto:hover { color: var(--text); }
 
 .submissions-loading {
   display: flex; align-items: center; gap: 10px;
@@ -1357,8 +1575,194 @@ section { position: relative; padding: 120px 40px; }
   display: flex; align-items: center; justify-content: space-between;
   font-size: 12px;
   color: var(--text-muted);
+  flex-wrap: wrap; gap: 10px;
 }
 .submission-time { font-family: var(--font-mono); font-size: 11px; }
+
+/* GHB-83+84: solver wallet pill (live balance + copy) -------------- */
+.solver-wallet {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+.solver-wallet-addr {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color .2s, color .2s;
+}
+.solver-wallet-addr:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.solver-wallet-addr code { font-family: inherit; font-size: 11px; }
+.solver-wallet-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(0, 229, 209, 0.5);
+}
+/* GHB-83+84: action button row + decided-card states ---------------- */
+.submission-card-actions {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.submission-card-winner {
+  border-color: rgba(255, 209, 102, 0.35);
+  background: linear-gradient(180deg, rgba(255, 209, 102, 0.04), rgba(0,0,0,0));
+}
+.submission-card-rejected {
+  opacity: 0.6;
+}
+.submission-card-rejected .submission-pr-link { opacity: 0.85; }
+
+.submission-badge-rejected {
+  color: var(--text-dim);
+  border-color: var(--border-strong);
+  background: rgba(255,255,255,0.02);
+}
+
+.submission-reject-feedback {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--border-strong);
+  background: rgba(255, 107, 107, 0.04);
+}
+.submission-reject-feedback-label {
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: #FF6B6B;
+  font-weight: 500;
+}
+.submission-reject-feedback p {
+  font-size: 13px; color: var(--text-dim);
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* GHB-83 follow-up: same shape as the reject feedback panel but in
+ * accent teal — used on /app/profile next to the winning submission. */
+.submission-approve-feedback {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--accent);
+  background: rgba(0, 229, 209, 0.04);
+}
+.submission-approve-feedback-label {
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 500;
+}
+.submission-approve-feedback p {
+  font-size: 13px; color: var(--text-dim);
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* GHB-92 follow-up: neutral panel for "another submission won" — same
+ * shape as the others but in a muted gray so it reads as "closed,
+ * non-event" rather than success or failure. */
+.submission-lost-feedback {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px dashed var(--border-strong);
+  background: rgba(255, 255, 255, 0.02);
+}
+.submission-lost-feedback-label {
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.submission-lost-feedback p {
+  font-size: 13px; color: var(--text-dim);
+  margin: 0;
+}
+
+/* "Reject" button — slightly muted red so it doesn't compete with the
+ * primary "Select winner" CTA. Shape mirrors `.btn-ghost`. */
+.btn-reject {
+  background: transparent;
+  color: #FF6B6B;
+  border: 1px solid rgba(255, 107, 107, 0.35);
+}
+.btn-reject:hover {
+  background: rgba(255, 107, 107, 0.06);
+  border-color: rgba(255, 107, 107, 0.55);
+}
+.btn-reject:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+
+/* Reject / Pick winner shared modal bits -------------------------- */
+.reject-target {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.01);
+  margin-bottom: 12px;
+}
+.reject-target-meta { display: flex; flex-direction: column; gap: 2px; }
+.reject-target-name { font-weight: 500; }
+.reject-target-pr {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.reject-target-pr:hover { text-decoration: underline; }
+
+.reject-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 96px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13.5px; line-height: 1.5;
+}
+.reject-textarea:focus {
+  outline: none;
+  border-color: var(--border-strong);
+  background: rgba(255,255,255,0.03);
+}
+.field-label-aux {
+  color: var(--text-dim);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 11.5px;
+  margin-left: 6px;
+}
+
+.pick-winner-summary {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 229, 209, 0.025);
+  margin: 12px 0;
+}
+.pick-summary-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; font-size: 13.5px;
+}
+.pick-amount {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+.pick-amount strong { font-size: 16px; font-weight: 600; }
+.pick-solver { font-size: 12px; color: var(--text-dim); }
 
 .bounty-card-head-right {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
@@ -2469,10 +2873,69 @@ section { position: relative; padding: 120px 40px; }
   font-family: var(--font-mono);
   font-size: 11.5px; letter-spacing: .05em;
 }
+/* GHB-84: dev marketplace — rejected submissions render this clickable
+ * pill that links to /app/profile. We don't surface the company's
+ * feedback here (the dashboard is meant for browsing); the dev clicks
+ * through to read it in context with their full submission. */
+.rejected-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 8px;
+  background: rgba(255, 107, 107, 0.05);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: #FF6B6B;
+  font-family: var(--font-mono);
+  font-size: 11.5px; letter-spacing: .05em;
+  text-decoration: none;
+  transition: background-color .12s, border-color .12s;
+}
+.rejected-pill:hover {
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.5);
+}
+
+/* GHB-83 follow-up: green analogue of `.rejected-pill`. Shows up on
+ * the dev marketplace when THIS dev was picked as the winner. Click
+ * sends them to /app/profile where the full approval feedback (if
+ * any) is rendered in context. */
+.approved-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 8px;
+  background: rgba(0, 229, 209, 0.08);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11.5px; letter-spacing: .05em;
+  text-decoration: none;
+  font-weight: 500;
+  transition: background-color .12s, border-color .12s;
+}
+.approved-pill:hover {
+  background: rgba(0, 229, 209, 0.14);
+}
+
+/* GHB-92 follow-up: muted pill for "another submission won this bounty".
+ * Same shape as `.rejected-pill` but neutral gray — the dev didn't fail,
+ * they just didn't win this one. Click goes to /app/profile. */
+.lost-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11.5px; letter-spacing: .05em;
+  text-decoration: none;
+  transition: background-color .12s, border-color .12s;
+}
+.lost-pill:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border-strong);
+}
 
 .status-badge.submission-pending { color: #FEBC2E; border-color: rgba(254, 188, 46, 0.3); background: rgba(254, 188, 46, 0.06); }
 .status-badge.submission-accepted { color: var(--accent); border-color: var(--border-strong); background: rgba(0, 229, 209, 0.06); }
 .status-badge.submission-rejected { color: #FF6B6B; border-color: rgba(255, 107, 107, 0.3); background: rgba(255, 107, 107, 0.05); }
+.status-badge.submission-lost { color: var(--text-dim); border-color: var(--border); background: rgba(255, 255, 255, 0.02); }
 
 .submission-note {
   font-size: 12.5px; color: var(--text-dim);

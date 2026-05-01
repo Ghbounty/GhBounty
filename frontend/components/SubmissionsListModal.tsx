@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Avatar } from "./Avatar";
+import { PickWinnerModal } from "./PickWinnerModal";
+import { RejectSubmissionModal } from "./RejectSubmissionModal";
 import {
   fetchSubmissionsForBountyDetailed,
   type EnrichedSubmission,
 } from "@/lib/data";
+import { useAuth } from "@/lib/auth-context";
+import { effectiveRejectThreshold } from "@/lib/constants";
 import type { Bounty } from "@/lib/types";
 
 /**
@@ -15,9 +19,10 @@ import type { Bounty } from "@/lib/types";
  * to reject" hint when the score is below the bounty's
  * `reject_threshold`.
  *
- * Read-only for now: the company sees the data and can click through to
- * GitHub. Approve / reject actions live in a follow-up ticket once the
- * scoring pipeline (Opus + GenLayer) actually fills in scores.
+ * GHB-83 + GHB-84: each card now has two action buttons — "Reject" (DB
+ * only, opens a feedback textarea) and "Select winner" (signs
+ * resolve_bounty on-chain via Privy). Both are gated on the bounty
+ * still being open AND the submission not already being decided.
  */
 
 export function SubmissionsListModal({
@@ -27,11 +32,24 @@ export function SubmissionsListModal({
   bounty: Bounty;
   onClose: () => void;
 }) {
+  const { user } = useAuth();
   const [items, setItems] = useState<EnrichedSubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pickFor, setPickFor] = useState<EnrichedSubmission | null>(null);
+  const [rejectFor, setRejectFor] = useState<EnrichedSubmission | null>(null);
+  // Bumped after every successful pick/reject so we re-fetch the
+  // submissions list (the EnrichedSubmission rows carry the review state
+  // we want to render on the cards).
+  const [refreshTick, setRefreshTick] = useState(0);
+  // GHB-85: hide auto-rejected by default. The relayer flips
+  // `auto_rejected=true` whenever a PR scores below the threshold;
+  // the company shouldn't have to wade past obvious noise to find
+  // the real candidates. Toggle reveals them on demand.
+  const [showAutoRejected, setShowAutoRejected] = useState(false);
 
   // Lock body scroll + ESC handler. No "busy" gating because nothing
-  // here mutates state we'd lose by closing.
+  // here mutates state we'd lose by closing the OUTER modal — the inner
+  // modals (PickWinner / Reject) own their own busy-locks.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -62,7 +80,53 @@ export function SubmissionsListModal({
     return () => {
       cancelled = true;
     };
-  }, [bounty.id, bounty.rejectThreshold]);
+  }, [bounty.id, bounty.rejectThreshold, refreshTick]);
+
+  // A bounty is "settled" once any submission is the winner OR the
+  // bounty's status reflects a payout/cancellation. Both action buttons
+  // disappear from every card in that case — no second pick allowed.
+  // Same on-chain-OR-off-chain check as `isWinner` below.
+  const hasWinner =
+    items?.some(
+      (s) => s.state === "winner" || s.review?.approved === true,
+    ) ?? false;
+
+  // GHB-85: split visible vs hidden cards by the auto_rejected flag.
+  // The default view drops auto-rejected; the toggle (when there's at
+  // least one) brings them back into the list with a muted treatment.
+  const autoRejectedCount =
+    items?.filter((s) => s.review?.autoRejected === true).length ?? 0;
+  const visibleItems = items
+    ? showAutoRejected
+      ? items
+      : items.filter((s) => !s.review?.autoRejected)
+    : null;
+
+  const effectiveThreshold = effectiveRejectThreshold(
+    bounty.rejectThreshold,
+  );
+  const settledStatus =
+    bounty.status === "approved" ||
+    bounty.status === "paid" ||
+    bounty.status === "closed";
+  const settled = hasWinner || settledStatus;
+
+  // Gate the action buttons on the viewer being the bounty creator. A
+  // dev who somehow opens this modal (unlikely; the entry point is the
+  // company dashboard) never sees Pick/Reject.
+  const isOwner =
+    !!user && user.role === "company" && user.id === bounty.companyId;
+  const canAct = isOwner && !settled;
+
+  const onPickWinner = useCallback((s: EnrichedSubmission) => {
+    setPickFor(s);
+  }, []);
+  const onReject = useCallback((s: EnrichedSubmission) => {
+    setRejectFor(s);
+  }, []);
+  const bumpRefresh = useCallback(() => {
+    setRefreshTick((t) => t + 1);
+  }, []);
 
   if (typeof document === "undefined") return null;
   return createPortal(
@@ -83,14 +147,37 @@ export function SubmissionsListModal({
           {bounty.title && <p className="modal-note">{bounty.title}</p>}
           <div className="submissions-meta">
             <span>
-              {(items?.length ?? 0)} PR{(items?.length ?? 0) === 1 ? "" : "s"}
+              {(visibleItems?.length ?? 0)} PR
+              {(visibleItems?.length ?? 0) === 1 ? "" : "s"}
+              {autoRejectedCount > 0 && !showAutoRejected && (
+                <span className="submissions-meta-aux">
+                  {" "}
+                  ({autoRejectedCount} auto-rejected hidden)
+                </span>
+              )}
             </span>
             <span className="submissions-meta-sep">·</span>
             <span>
-              {bounty.rejectThreshold != null
-                ? `Auto-reject below ${bounty.rejectThreshold}/10`
+              {effectiveThreshold != null
+                ? `Auto-reject below ${effectiveThreshold}/10${
+                    bounty.rejectThreshold == null ? " (default)" : ""
+                  }`
                 : "No auto-rejection"}
             </span>
+            {autoRejectedCount > 0 && (
+              <>
+                <span className="submissions-meta-sep">·</span>
+                <button
+                  type="button"
+                  className="submissions-toggle-auto"
+                  onClick={() => setShowAutoRejected((v) => !v)}
+                >
+                  {showAutoRejected
+                    ? "Hide auto-rejected"
+                    : `Show auto-rejected (${autoRejectedCount})`}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -101,18 +188,29 @@ export function SubmissionsListModal({
             <span className="loading-dot" />
             <span>Loading submissions…</span>
           </div>
-        ) : items.length === 0 ? (
+        ) : visibleItems!.length === 0 ? (
           <div className="empty">
-            <p>No submissions yet.</p>
+            <p>
+              {items.length === 0
+                ? "No submissions yet."
+                : "All submissions were auto-rejected."}
+            </p>
             <p className="muted">
-              When developers submit PRs against this bounty, they&apos;ll
-              show up here with their AI scores.
+              {items.length === 0
+                ? "When developers submit PRs against this bounty, they'll show up here with their AI scores."
+                : "Click \"Show auto-rejected\" above if you want to triage them anyway."}
             </p>
           </div>
         ) : (
           <ul className="submissions-list">
-            {items.map((s) => (
-              <SubmissionCard key={s.id} submission={s} />
+            {visibleItems!.map((s) => (
+              <SubmissionCard
+                key={s.id}
+                submission={s}
+                canAct={canAct}
+                onPickWinner={onPickWinner}
+                onReject={onReject}
+              />
             ))}
           </ul>
         )}
@@ -123,18 +221,72 @@ export function SubmissionsListModal({
           </button>
         </div>
       </div>
+
+      {pickFor && user && (
+        <PickWinnerModal
+          bounty={bounty}
+          submission={pickFor}
+          reviewerUserId={user.id}
+          onClose={() => setPickFor(null)}
+          onResolved={() => {
+            setPickFor(null);
+            bumpRefresh();
+          }}
+        />
+      )}
+
+      {rejectFor && user && (
+        <RejectSubmissionModal
+          bounty={bounty}
+          submission={rejectFor}
+          reviewerUserId={user.id}
+          onClose={() => setRejectFor(null)}
+          onRejected={() => {
+            setRejectFor(null);
+            bumpRefresh();
+          }}
+        />
+      )}
     </div>,
     document.body,
   );
 }
 
-function SubmissionCard({ submission: s }: { submission: EnrichedSubmission }) {
+function SubmissionCard({
+  submission: s,
+  canAct,
+  onPickWinner,
+  onReject,
+}: {
+  submission: EnrichedSubmission;
+  /** When false, the action buttons disappear (bounty already settled,
+   * or the viewer isn't the bounty creator). */
+  canAct: boolean;
+  onPickWinner: (s: EnrichedSubmission) => void;
+  onReject: (s: EnrichedSubmission) => void;
+}) {
   const displayName = s.dev.username || s.dev.email || "Anonymous dev";
   const score = s.evaluation?.score ?? null;
-  const isWinner = s.state === "winner";
+  // Winner = on-chain mirror caught up OR we have the off-chain
+  // approved flag from `submission_reviews` (set immediately by
+  // `recordWinnerOnchain`). The off-chain flag exists to bridge the
+  // relayer lag on devnet so the Winner badge shows up right after
+  // the company picks.
+  const isWinner = s.state === "winner" || (s.review?.approved ?? false);
+  const isRejected = s.review?.rejected ?? false;
+  const isAutoRejected = s.review?.autoRejected ?? false;
+
+  // Decided submissions don't get action buttons even when the bounty is
+  // still nominally open — picking a rejected sub as winner would be
+  // weird UX, and re-rejecting an already-rejected one is no-op.
+  const showActions = canAct && !isWinner && !isRejected;
 
   return (
-    <li className="submission-card">
+    <li
+      className={`submission-card ${
+        isWinner ? "submission-card-winner" : ""
+      } ${isRejected ? "submission-card-rejected" : ""}`}
+    >
       <div className="submission-card-head">
         <div className="submission-dev">
           <Avatar src={s.dev.avatarUrl} name={displayName} size={32} />
@@ -150,6 +302,7 @@ function SubmissionCard({ submission: s }: { submission: EnrichedSubmission }) {
                 @{s.dev.githubHandle}
               </a>
             )}
+            <SolverWalletInfo solver={s.solver} />
           </div>
         </div>
         <div className="submission-card-badges">
@@ -158,7 +311,20 @@ function SubmissionCard({ submission: s }: { submission: EnrichedSubmission }) {
               ★ Winner
             </span>
           )}
-          {!isWinner && s.recommendedReject && (
+          {isRejected && !isAutoRejected && (
+            <span className="submission-badge submission-badge-rejected">
+              Rejected
+            </span>
+          )}
+          {isAutoRejected && (
+            <span
+              className="submission-badge submission-badge-rejected"
+              title="Score below the bounty's reject threshold"
+            >
+              Auto-rejected
+            </span>
+          )}
+          {!isWinner && !isRejected && s.recommendedReject && (
             <span className="submission-badge submission-badge-reject">
               Recommended to reject
             </span>
@@ -198,6 +364,22 @@ function SubmissionCard({ submission: s }: { submission: EnrichedSubmission }) {
         </details>
       )}
 
+      {/* GHB-84: surface the company's reject feedback. We render even
+        * when the reason is null so the dev sees the rejection itself
+        * (the badge above isn't enough on its own — we want the explicit
+        * "no reason was provided" footnote). */}
+      {isRejected && (
+        <div className="submission-reject-feedback">
+          <span className="submission-reject-feedback-label">
+            Rejection feedback
+          </span>
+          <p>
+            {s.review?.rejectReason ??
+              "No reason provided by the company."}
+          </p>
+        </div>
+      )}
+
       <div className="submission-card-foot">
         <span className="submission-time">
           {timeAgo(s.createdAt)}
@@ -208,17 +390,76 @@ function SubmissionCard({ submission: s }: { submission: EnrichedSubmission }) {
             </>
           )}
         </span>
-        <a
-          href={s.prUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn btn-ghost btn-sm"
-        >
-          View PR
-        </a>
+        <div className="submission-card-actions">
+          <a
+            href={s.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-ghost btn-sm"
+          >
+            View PR
+          </a>
+          {showActions && (
+            <>
+              <button
+                type="button"
+                className="btn btn-reject btn-sm"
+                onClick={() => onReject(s)}
+              >
+                Reject
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => onPickWinner(s)}
+              >
+                Select winner
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </li>
   );
+}
+
+/**
+ * Address chip for the dev's solver pubkey — clickable to copy the
+ * full base58 to clipboard. Deliberately does NOT show the dev's SOL
+ * balance: the company shouldn't see how much the dev holds (that's
+ * the dev's private info; surfaced in their own dashboard instead).
+ */
+function SolverWalletInfo({ solver }: { solver: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(solver);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — silent fail. */
+    }
+  };
+
+  return (
+    <div className="solver-wallet">
+      <button
+        type="button"
+        className="solver-wallet-addr"
+        onClick={onCopy}
+        title="Click to copy full address"
+      >
+        <span className="solver-wallet-dot" />
+        <code>{copied ? "Copied!" : shortAddr(solver)}</code>
+      </button>
+    </div>
+  );
+}
+
+function shortAddr(s: string): string {
+  if (s.length < 12) return s;
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
 }
 
 function timeAgo(ms: number): string {

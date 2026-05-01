@@ -3,11 +3,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { useAuth, usePrivyBackend } from "@/lib/auth-context";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { mockWallet, setWallet } from "@/lib/store";
+import { getConnection } from "@/lib/solana";
 import { Avatar } from "./Avatar";
+import { DepositModal } from "./DepositModal";
+import { WithdrawModal } from "./WithdrawModal";
+import { NotificationsBell } from "./NotificationsBell";
+import { useSupabaseBackend } from "@/lib/auth-context";
 
 function shortWallet(w: string) {
   if (w.length < 12) return w;
@@ -65,6 +71,44 @@ export function AppNav() {
     }
   }
 
+  // Live balance + Deposit/Withdraw chips. The header is the single
+  // global home for wallet actions: every screen shows the same chip
+  // row, so devs and companies use the same affordances regardless of
+  // which dashboard they're on. Re-fetch on `tick` so a deposit/withdraw
+  // result reflects without a full page refresh.
+  const [balanceSol, setBalanceSol] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
+  const [depositOpen, setDepositOpen] = useState(false);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+
+  useEffect(() => {
+    if (!walletAddress) {
+      setBalanceSol(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const conn = getConnection();
+        const lamports = await conn.getBalance(new PublicKey(walletAddress));
+        if (!cancelled) setBalanceSol(lamports / LAMPORTS_PER_SOL);
+      } catch (err) {
+        console.warn("[AppNav] balance fetch failed:", err);
+        if (!cancelled) setBalanceSol(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [walletAddress, tick]);
+
+  const refreshBalance = useCallback(() => setTick((t) => t + 1), []);
+  const canWithdraw =
+    privyMode &&
+    !!wallets[0] &&
+    balanceSol !== null &&
+    balanceSol > 0;
+
   return (
     <header className="appnav">
       <div className="appnav-inner">
@@ -88,15 +132,40 @@ export function AppNav() {
         </nav>
         <div className="appnav-right">
           {walletAddress ? (
-            <button
-              type="button"
-              className="wallet-btn connected"
-              onClick={handleCopy}
-              title="Click to copy address"
-            >
-              <span className="wallet-btn-dot" />
-              <code>{copied ? "Copied!" : shortWallet(walletAddress)}</code>
-            </button>
+            <>
+              <button
+                type="button"
+                className="wallet-btn connected"
+                onClick={handleCopy}
+                title="Click to copy address"
+              >
+                <span className="wallet-btn-dot" />
+                <code>{copied ? "Copied!" : shortWallet(walletAddress)}</code>
+                {balanceSol !== null && (
+                  <span className="wallet-btn-balance">
+                    {balanceSol.toFixed(3)} SOL
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                className="wallet-chip wallet-chip-deposit"
+                onClick={() => setDepositOpen(true)}
+                disabled={!privyMode}
+                title="Receive SOL into your Privy wallet"
+              >
+                Deposit
+              </button>
+              <button
+                type="button"
+                className="wallet-chip wallet-chip-withdraw"
+                onClick={() => setWithdrawOpen(true)}
+                disabled={!canWithdraw}
+                title="Send SOL from your Privy wallet to an external address"
+              >
+                Withdraw
+              </button>
+            </>
           ) : (
             <button className="wallet-btn" onClick={handleConnect}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -106,6 +175,12 @@ export function AppNav() {
               </svg>
               Connect wallet
             </button>
+          )}
+          {/* GHB-92: bell only renders on real backends (Privy/Supabase).
+              The localStorage mock has no `notifications` table so we'd
+              just be making 404'ing fetches. */}
+          {(privyMode || useSupabaseBackend) && (
+            <NotificationsBell userId={user.id} />
           )}
           <Link
             href="/app/profile"
@@ -136,6 +211,27 @@ export function AppNav() {
           </button>
         </div>
       </div>
+
+      {withdrawOpen && wallets[0] && (
+        <WithdrawModal
+          wallet={wallets[0]}
+          balanceSol={balanceSol}
+          onClose={() => setWithdrawOpen(false)}
+          onWithdrawn={refreshBalance}
+        />
+      )}
+
+      {depositOpen && walletAddress && (
+        <DepositModal
+          walletAddress={walletAddress}
+          network="Solana Devnet"
+          onClose={() => setDepositOpen(false)}
+          onRefresh={() => {
+            setDepositOpen(false);
+            refreshBalance();
+          }}
+        />
+      )}
     </header>
   );
 }
