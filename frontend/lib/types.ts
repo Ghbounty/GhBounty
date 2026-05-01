@@ -95,6 +95,14 @@ export type Submission = {
    */
   rejectReason?: string;
   /**
+   * GHB-85: distinguishes a submission auto-rejected by the relayer
+   * (Opus score below the bounty's `reject_threshold`) from one
+   * rejected manually by the company. Both share `status === "rejected"`
+   * — this flag refines the kind so the dev-side and company-side
+   * UI can render different copy + filter rules.
+   */
+  autoRejected?: boolean;
+  /**
    * Optional feedback the company left when picking this dev as the
    * winner (GHB-83 follow-up). Only meaningful when
    * `status === "accepted"`. Mirrors

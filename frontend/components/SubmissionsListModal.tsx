@@ -10,6 +10,7 @@ import {
   type EnrichedSubmission,
 } from "@/lib/data";
 import { useAuth } from "@/lib/auth-context";
+import { effectiveRejectThreshold } from "@/lib/constants";
 import type { Bounty } from "@/lib/types";
 
 /**
@@ -40,6 +41,11 @@ export function SubmissionsListModal({
   // submissions list (the EnrichedSubmission rows carry the review state
   // we want to render on the cards).
   const [refreshTick, setRefreshTick] = useState(0);
+  // GHB-85: hide auto-rejected by default. The relayer flips
+  // `auto_rejected=true` whenever a PR scores below the threshold;
+  // the company shouldn't have to wade past obvious noise to find
+  // the real candidates. Toggle reveals them on demand.
+  const [showAutoRejected, setShowAutoRejected] = useState(false);
 
   // Lock body scroll + ESC handler. No "busy" gating because nothing
   // here mutates state we'd lose by closing the OUTER modal — the inner
@@ -84,6 +90,21 @@ export function SubmissionsListModal({
     items?.some(
       (s) => s.state === "winner" || s.review?.approved === true,
     ) ?? false;
+
+  // GHB-85: split visible vs hidden cards by the auto_rejected flag.
+  // The default view drops auto-rejected; the toggle (when there's at
+  // least one) brings them back into the list with a muted treatment.
+  const autoRejectedCount =
+    items?.filter((s) => s.review?.autoRejected === true).length ?? 0;
+  const visibleItems = items
+    ? showAutoRejected
+      ? items
+      : items.filter((s) => !s.review?.autoRejected)
+    : null;
+
+  const effectiveThreshold = effectiveRejectThreshold(
+    bounty.rejectThreshold,
+  );
   const settledStatus =
     bounty.status === "approved" ||
     bounty.status === "paid" ||
@@ -126,14 +147,37 @@ export function SubmissionsListModal({
           {bounty.title && <p className="modal-note">{bounty.title}</p>}
           <div className="submissions-meta">
             <span>
-              {(items?.length ?? 0)} PR{(items?.length ?? 0) === 1 ? "" : "s"}
+              {(visibleItems?.length ?? 0)} PR
+              {(visibleItems?.length ?? 0) === 1 ? "" : "s"}
+              {autoRejectedCount > 0 && !showAutoRejected && (
+                <span className="submissions-meta-aux">
+                  {" "}
+                  ({autoRejectedCount} auto-rejected hidden)
+                </span>
+              )}
             </span>
             <span className="submissions-meta-sep">·</span>
             <span>
-              {bounty.rejectThreshold != null
-                ? `Auto-reject below ${bounty.rejectThreshold}/10`
+              {effectiveThreshold != null
+                ? `Auto-reject below ${effectiveThreshold}/10${
+                    bounty.rejectThreshold == null ? " (default)" : ""
+                  }`
                 : "No auto-rejection"}
             </span>
+            {autoRejectedCount > 0 && (
+              <>
+                <span className="submissions-meta-sep">·</span>
+                <button
+                  type="button"
+                  className="submissions-toggle-auto"
+                  onClick={() => setShowAutoRejected((v) => !v)}
+                >
+                  {showAutoRejected
+                    ? "Hide auto-rejected"
+                    : `Show auto-rejected (${autoRejectedCount})`}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -144,17 +188,22 @@ export function SubmissionsListModal({
             <span className="loading-dot" />
             <span>Loading submissions…</span>
           </div>
-        ) : items.length === 0 ? (
+        ) : visibleItems!.length === 0 ? (
           <div className="empty">
-            <p>No submissions yet.</p>
+            <p>
+              {items.length === 0
+                ? "No submissions yet."
+                : "All submissions were auto-rejected."}
+            </p>
             <p className="muted">
-              When developers submit PRs against this bounty, they&apos;ll
-              show up here with their AI scores.
+              {items.length === 0
+                ? "When developers submit PRs against this bounty, they'll show up here with their AI scores."
+                : "Click \"Show auto-rejected\" above if you want to triage them anyway."}
             </p>
           </div>
         ) : (
           <ul className="submissions-list">
-            {items.map((s) => (
+            {visibleItems!.map((s) => (
               <SubmissionCard
                 key={s.id}
                 submission={s}
@@ -224,6 +273,7 @@ function SubmissionCard({
   // the company picks.
   const isWinner = s.state === "winner" || (s.review?.approved ?? false);
   const isRejected = s.review?.rejected ?? false;
+  const isAutoRejected = s.review?.autoRejected ?? false;
 
   // Decided submissions don't get action buttons even when the bounty is
   // still nominally open — picking a rejected sub as winner would be
@@ -260,9 +310,17 @@ function SubmissionCard({
               ★ Winner
             </span>
           )}
-          {isRejected && (
+          {isRejected && !isAutoRejected && (
             <span className="submission-badge submission-badge-rejected">
               Rejected
+            </span>
+          )}
+          {isAutoRejected && (
+            <span
+              className="submission-badge submission-badge-rejected"
+              title="Score below the bounty's reject threshold"
+            >
+              Auto-rejected
             </span>
           )}
           {!isWinner && !isRejected && s.recommendedReject && (

@@ -26,6 +26,7 @@ import type {
   Submission,
   SubmissionStatus,
 } from "./types";
+import { effectiveRejectThreshold } from "./constants";
 import { useSupabaseBackend, usePrivyBackend } from "./auth-context";
 
 /**
@@ -401,13 +402,18 @@ function parseGithubPrUrl(url: string): { prRepo: string; prNumber: number } {
   return { prRepo: m[1], prNumber: Number(m[2]) };
 }
 
-/** GHB-84 + GHB-83 follow-up review shape from `submission_reviews`.
+/** GHB-84 + GHB-83 + GHB-85 review shape from `submission_reviews`.
  * Optional — passing `null` (no row in the table) means "not decided
- * yet". `approval_feedback` was added in migration 0011, `approved` in
- * 0012. */
+ * yet". Column history:
+ *   0010 → rejected, reject_reason
+ *   0011 → approval_feedback
+ *   0012 → approved
+ *   0013 → auto_rejected
+ */
 type SubmissionReviewRow = {
   rejected: boolean;
   approved: boolean;
+  auto_rejected: boolean;
   reject_reason: string | null;
   approval_feedback: string | null;
 };
@@ -448,6 +454,7 @@ function rowToSubmission(
       status === "accepted" && review?.approval_feedback
         ? review.approval_feedback
         : undefined,
+    autoRejected: review?.auto_rejected ?? false,
     createdAt: new Date(row.created_at).getTime(),
   };
 }
@@ -538,13 +545,14 @@ export async function fetchSubmissionsByDev(
     const { data: reviews } = await supabase
       .from("submission_reviews" as never)
       .select(
-        "submission_id, rejected, approved, reject_reason, approval_feedback",
+        "submission_id, rejected, approved, auto_rejected, reject_reason, approval_feedback",
       )
       .in("submission_id", subIds);
     const reviewRows = (reviews as unknown as Array<{
       submission_id: string;
       rejected: boolean;
       approved: boolean;
+      auto_rejected: boolean;
       reject_reason: string | null;
       approval_feedback: string | null;
     }>) ?? [];
@@ -552,6 +560,7 @@ export async function fetchSubmissionsByDev(
       reviewById.set(r.submission_id, {
         rejected: r.rejected,
         approved: r.approved,
+        auto_rejected: r.auto_rejected,
         reject_reason: r.reject_reason,
         approval_feedback: r.approval_feedback,
       });
@@ -620,7 +629,7 @@ export type EnrichedSubmission = {
   /** `score < bounty.rejectThreshold` — only meaningful when scored. */
   recommendedReject: boolean;
   /**
-   * Company-side review decision (GHB-84 + GHB-83 follow-up). Mirrors
+   * Company-side review decision (GHB-83 / GHB-84 / GHB-85). Mirrors
    * the `submission_reviews` row when present; `null` otherwise —
    * meaning the company hasn't acted on this submission yet.
    *
@@ -632,10 +641,16 @@ export type EnrichedSubmission = {
    * written immediately by `recordWinnerOnchain` so the UI doesn't have
    * to wait for the relayer to flip `submissions.state = 'winner'`.
    * Read-side: either signal flips the card into the Winner state.
+   *
+   * `autoRejected: true` refines the rejection: `true` means the
+   * relayer auto-rejected because the score landed below the bounty's
+   * threshold (the rejection reason holds the score-vs-threshold
+   * message). `false` means a human at the company manually rejected.
    */
   review: {
     rejected: boolean;
     approved: boolean;
+    autoRejected: boolean;
     rejectReason: string | null;
     approvalFeedback: string | null;
     decidedAt: number | null;
@@ -764,7 +779,7 @@ export async function fetchSubmissionsForBountyDetailed(
     supabase
       .from("submission_reviews" as never)
       .select(
-        "submission_id, rejected, approved, reject_reason, approval_feedback, decided_at",
+        "submission_id, rejected, approved, auto_rejected, reject_reason, approval_feedback, decided_at",
       )
       .in("submission_id", subIds),
   ]);
@@ -785,12 +800,13 @@ export async function fetchSubmissionsForBountyDetailed(
     });
   }
 
-  // GHB-83+84: review decisions, keyed by submission_id (PK in the
+  // GHB-83+84+85: review decisions, keyed by submission_id (PK in the
   // review table). Missing row → no decision yet.
   const reviewRows = (reviewQ.data as unknown as Array<{
     submission_id: string;
     rejected: boolean;
     approved: boolean;
+    auto_rejected: boolean;
     reject_reason: string | null;
     approval_feedback: string | null;
     decided_at: string;
@@ -800,6 +816,7 @@ export async function fetchSubmissionsForBountyDetailed(
     reviewById.set(r.submission_id, {
       rejected: r.rejected,
       approved: r.approved,
+      autoRejected: r.auto_rejected,
       rejectReason: r.reject_reason,
       approvalFeedback: r.approval_feedback,
       decidedAt: r.decided_at ? new Date(r.decided_at).getTime() : null,
@@ -812,10 +829,14 @@ export async function fetchSubmissionsForBountyDetailed(
     const devProfile = devId ? devsById.get(devId) : undefined;
     const profile = devId ? profilesById.get(devId) : undefined;
     const evaluation = evalByPda.get(row.pda) ?? null;
+    // GHB-85: fall back to the global default if the bounty doesn't
+    // declare a per-issue threshold. Pass `false` to opt out entirely
+    // (e.g. tests that want pure manual triage).
+    const effective = effectiveRejectThreshold(rejectThreshold);
     const recommendedReject =
       evaluation?.score != null &&
-      rejectThreshold != null &&
-      evaluation.score < rejectThreshold;
+      effective != null &&
+      evaluation.score < effective;
     return {
       id: row.id,
       pda: row.pda,

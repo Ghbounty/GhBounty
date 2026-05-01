@@ -1292,6 +1292,25 @@ section { position: relative; padding: 120px 40px; }
   color: var(--text-dim);
 }
 .submissions-meta-sep { opacity: 0.5; }
+/* GHB-85: subdued count of hidden auto-rejected submissions inline
+ * with the PR count, plus the toggle that flips them back into the
+ * list. The toggle reads as a link rather than a chip — it's a
+ * triage tool, not a primary action. */
+.submissions-meta-aux { opacity: 0.6; text-transform: none; letter-spacing: 0; }
+.submissions-toggle-auto {
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.submissions-toggle-auto:hover { color: var(--text); }
 
 .submissions-loading {
   display: flex; align-items: center; gap: 10px;
