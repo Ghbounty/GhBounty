@@ -1,3 +1,13 @@
+// Load `.env` before any module reads `process.env`. The relayer is the
+// only entry point of this package, so a single import here is enough —
+// every helper (config.ts, db ops, scorer) reads env later in the chain.
+//
+// `override: true` because parent environments (Claude Code, some shells)
+// may pre-define `ANTHROPIC_API_KEY=""` etc. — dotenv's default is to
+// NOT overwrite, which leaves us with a useless empty string and
+// `enabled: false`. The `.env` is the source of truth for the relayer.
+import { config as dotenvConfig } from "dotenv";
+dotenvConfig({ override: true, quiet: true });
 import { Connection } from "@solana/web3.js";
 
 import { loadConfig } from "./config.js";
