@@ -1,4 +1,4 @@
-# Ghbounty
+# ghbounty 🚀
 
 > Automated GitHub bounty marketplace with AI-verified PRs. Opus analyzes, GenLayer juries on-chain, humans pick the winner. Solana-first, agent-native via x402 + MCP.
 
