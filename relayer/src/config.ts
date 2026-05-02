@@ -41,7 +41,13 @@ function loadScorerKeypair(): Keypair {
     "SCORER_KEYPAIR_PATH",
     path.join(os.homedir(), ".config/solana/ghbounty-dev.json"),
   );
-  const raw = JSON.parse(fs.readFileSync(keypairPath, "utf-8")) as number[];
+  // Expand a leading `~` — `fs.readFileSync` does not, and the .env.example
+  // uses `~/.config/...` as the documented value. Without this, the relayer
+  // crashes on every loop iteration with ENOENT against the literal tilde.
+  const expandedPath = keypairPath.startsWith("~")
+    ? path.join(os.homedir(), keypairPath.slice(1))
+    : keypairPath;
+  const raw = JSON.parse(fs.readFileSync(expandedPath, "utf-8")) as number[];
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
 
