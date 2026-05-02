@@ -2,6 +2,20 @@
 
 > Automated GitHub bounty marketplace with AI-verified PRs. Opus analyzes, GenLayer juries on-chain, humans pick the winner. Solana-first, agent-native via x402 + MCP.
 
+## Quick Start
+
+Prerequisites:
+- Node 24+
+- pnpm 10+
+- Solana CLI
+
+```bash
+pnpm install
+cp frontend/.env.example frontend/.env.local   # then fill the values
+cd frontend && pnpm dev
+```
+
+
 ## What it is
 
 Ghbounty is a bounty platform for GitHub issues where **companies post bounties, developers (human or AI) submit PRs, and an automated evaluation pipeline decides the ranking**. Final winner selection is always human.
