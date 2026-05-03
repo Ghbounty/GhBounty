@@ -148,3 +148,110 @@ export interface DetectOptions {
    */
   customCommand?: string | null;
 }
+
+// ── GHB-72: full sandbox executor (clone PR → install → test) ─────────
+
+/**
+ * Spec the relayer ships to the sandbox machine via the SANDBOX_SPEC
+ * env var. Mirrored on the runner.mjs side — keep field names in sync.
+ *
+ * `prNumber` is optional: when omitted, the runner tests `baseRef`
+ * directly (useful for harness smoke tests). In production every
+ * submission has a PR.
+ *
+ * `gitToken` is forwarded as a GitHub bearer token via
+ * http.extraHeader, so private repos and 5000-req/h rate limits work.
+ * It NEVER ends up in the URL or git config.
+ *
+ * `testTimeoutS` is the inner deadline for the install + test phases
+ * combined. Should be < SandboxConfig.timeoutS to leave the relayer
+ * room to read the result before Fly tears the machine down.
+ */
+export interface SandboxSpec {
+  repoUrl: string;
+  baseRef: string;
+  prNumber: number | null;
+  customCommand: string | null;
+  testTimeoutS: number;
+  gitToken: string | null;
+}
+
+/**
+ * What the relayer hands to `runSandboxedTests`. Always derives
+ * `SandboxSpec` from this plus relayer config.
+ */
+export interface ExecutorOptions {
+  repoUrl: string;
+  baseRef: string;
+  prNumber: number | null;
+  customCommand?: string | null;
+  /** Optional override of the inner test deadline. */
+  testTimeoutS?: number;
+}
+
+/**
+ * High-level outcome handed back to the submission handler. Mirrors
+ * the JSON shape `runner.mjs` emits, with one extra field
+ * (`sandboxResult`) describing how the Fly machine itself terminated.
+ *
+ * The submission handler collapses these into score-affecting signals
+ * (passed / failed / no-tests-available) plus telemetry for ops.
+ */
+export type ExecutorResult =
+  | {
+      // Runner ran, tests completed (pass OR fail — read exitCode).
+      kind: "exited";
+      runner: { kind: RunnerKind; command: string[]; markers: string[] };
+      exitCode: number | null;
+      durationMs: number;
+      stdoutTail: string;
+      stderrTail: string;
+    }
+  | {
+      // Either the install or the test phase exceeded testTimeoutS.
+      kind: "timeout";
+      phase: "install" | "test";
+      runner: { kind: RunnerKind; command: string[]; markers: string[] };
+      durationMs: number;
+      stdoutTail: string;
+      stderrTail: string;
+    }
+  | {
+      // `npm ci` / `pip install` etc. failed before tests could run.
+      // Surfaced separately so the relayer can distinguish "broken
+      // deps" from "broken tests" in scoring + ops telemetry.
+      kind: "install_error";
+      runner: { kind: RunnerKind; command: string[]; markers: string[] };
+      exitCode: number | null;
+      durationMs: number;
+      stdoutTail: string;
+      stderrTail: string;
+    }
+  | {
+      // git clone / fetch / checkout failed (private repo without
+      // token, deleted PR, network blip…). Not the developer's fault.
+      kind: "git_error";
+      reason: string;
+      durationMs: number;
+    }
+  | {
+      // Detector returned null: the repo doesn't have any test
+      // markers we recognize. Caller's the GHB-73 fallback path.
+      kind: "no_runner";
+      reason: string;
+      durationMs: number;
+    }
+  | {
+      // Sandbox subsystem disabled (FLY_API_TOKEN / FLY_SANDBOX_APP
+      // unset) — relayer skips spawn entirely.
+      kind: "disabled";
+      reason: string;
+    }
+  | {
+      // Anything else: Fly create failed, machine never started, the
+      // runner crashed without emitting a result line, etc. Not the
+      // developer's fault either; relayer logs + falls back.
+      kind: "infra";
+      reason: string;
+      durationMs: number;
+    };

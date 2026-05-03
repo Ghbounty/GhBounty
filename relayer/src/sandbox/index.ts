@@ -17,6 +17,8 @@ export {
 
 export { detectTestRunner } from "./detector.js";
 
+export { runSandboxedTests, parseResultFromLogs } from "./executor.js";
+
 export type {
   SandboxConfig,
   SandboxHandle,
@@ -25,4 +27,7 @@ export type {
   RunnerKind,
   RunnerSpec,
   DetectOptions,
+  SandboxSpec,
+  ExecutorOptions,
+  ExecutorResult,
 } from "./types.js";

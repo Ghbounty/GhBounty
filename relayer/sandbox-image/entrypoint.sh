@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Sandbox entrypoint — minimal stub for GHB-70.
+# Sandbox entrypoint — dispatches between smoke-test and real runner.
 #
-# This script's only job in GHB-70 is to make the spawn lifecycle
-# observable: when the relayer starts a Fly machine with this image,
-# the machine boots, prints the toolchain versions, and exits 0. The
-# relayer waits for that exit and confirms the machine destroys itself
-# (Fly does this automatically when `auto_destroy: true` is set on the
-# config and the main process exits).
+# Two modes:
+#   1. SANDBOX_SPEC env var unset       → smoke test (print toolchain
+#                                         versions, exit 0). Same as
+#                                         GHB-70 — used to validate the
+#                                         image with `flyctl machine run`.
+#   2. SANDBOX_SPEC env var present     → exec the GHB-72 runner, which
+#                                         clones the PR, detects the
+#                                         test runner, and reports JSON.
 #
-# GHB-72 will replace the body with the real "clone repo, fetch PR,
-# detect runner, run tests" pipeline. The contract with the relayer
-# stays the same: read SANDBOX_* env vars for inputs, write a single
-# JSON line to stdout as the result, exit non-zero on infra failure.
+# We exec node directly instead of nesting `node …` under bash so the
+# SIGTERM Fly sends on shutdown reaches the node process, not bash.
+# Otherwise the node process keeps running until SIGKILL fires, eating
+# 5-10s of every shutdown.
 
 set -euo pipefail
 
-# If no spec, run the smoke-test path (toolchain versions). Useful for
-# `flyctl machines run` to verify the image has all binaries available.
 if [[ -z "${SANDBOX_SPEC:-}" ]]; then
   echo "sandbox: no SANDBOX_SPEC, running smoke test" >&2
   echo "node:    $(node --version)"
@@ -31,9 +31,6 @@ if [[ -z "${SANDBOX_SPEC:-}" ]]; then
   exit 0
 fi
 
-# Real pipeline lives in GHB-72. For now, surface that the spec was
-# received but no executor is wired yet. Exit 0 so the relayer's
-# spawn-lifecycle test still passes.
-echo "sandbox: SANDBOX_SPEC received but executor not implemented (GHB-72)" >&2
-echo "{\"status\":\"not_implemented\",\"reason\":\"GHB-72 pending\"}"
-exit 0
+# Real pipeline: hand off to the node runner. `exec` replaces this
+# bash process so signal handling stays clean.
+exec node /usr/local/bin/sandbox-runner.mjs
