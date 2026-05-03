@@ -226,6 +226,13 @@ async function emitEvaluationNotifications(
   const sharedPayload = {
     bountyTitle: bountyInfo?.title ?? undefined,
     bountyAmount: bountyAmount > 0 ? bountyAmount : undefined,
+    // GHB-127: persist a snapshot of the company branding on the notif
+    // so the bell renders the right logo + name without joining at read
+    // time. Snapshot semantics: if the company later changes their logo
+    // the existing notif keeps the old one (acceptable historical record).
+    companyId: bountyInfo?.companyId ?? undefined,
+    companyName: bountyInfo?.companyName ?? undefined,
+    companyAvatarUrl: bountyInfo?.companyAvatarUrl ?? undefined,
   };
 
   if (ctx.outcome === "auto_rejected") {

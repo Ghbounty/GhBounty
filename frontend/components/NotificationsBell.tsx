@@ -16,6 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Avatar } from "./Avatar";
 import { createClient } from "@/utils/supabase/client";
 import {
   fetchNotifications,
@@ -188,6 +189,14 @@ function NotificationRow({
   onClick: () => void;
 }) {
   const { title, body, accent } = renderNotification(n);
+  // GHB-127: company branding snapshot was persisted at write-time. We
+  // prefer the logo over the colour dot when present — it's the same
+  // identity the dev sees on the bounty card / detail page, so the
+  // notification feels like "from Acme" rather than a system message.
+  const companyName = n.payload.companyName;
+  const companyAvatar = n.payload.companyAvatarUrl;
+  const hasBranding = !!companyName;
+
   return (
     <li>
       <button
@@ -195,8 +204,23 @@ function NotificationRow({
         className={`notif-item notif-item-${accent} ${n.readAt === null ? "unread" : ""}`}
         onClick={onClick}
       >
-        <span className={`notif-dot notif-dot-${accent}`} />
+        {hasBranding ? (
+          <span className="notif-avatar">
+            <Avatar
+              src={companyAvatar}
+              name={companyName!}
+              size={28}
+              rounded={false}
+            />
+            <span className={`notif-avatar-tag notif-dot-${accent}`} />
+          </span>
+        ) : (
+          <span className={`notif-dot notif-dot-${accent}`} />
+        )}
         <span className="notif-body">
+          {hasBranding && (
+            <span className="notif-company">{companyName}</span>
+          )}
           <span className="notif-title">{title}</span>
           {body && <span className="notif-excerpt">{body}</span>}
           <span className="notif-time">{relativeTime(n.createdAt)}</span>

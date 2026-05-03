@@ -55,6 +55,7 @@ export function PickWinnerModal({
   bounty,
   submission,
   reviewerUserId,
+  companyBranding,
   onClose,
   onResolved,
 }: {
@@ -64,6 +65,15 @@ export function PickWinnerModal({
    * to `recordWinnerOnchain` for `submission_reviews.decided_by` audit
    * symmetry with the reject path. */
   reviewerUserId: string;
+  /** GHB-127: snapshot of the company's branding (id + name + logo) so
+   * the dev's notification carries it on the payload. The parent is
+   * gated on `user.role === "company"`, so this is always set in the
+   * happy path; left optional for type-narrowing convenience. */
+  companyBranding?: {
+    companyId: string;
+    companyName: string;
+    companyAvatarUrl: string | undefined;
+  };
   onClose: () => void;
   /** Called after on-chain confirmation + DB mirror update.
    * Receives the tx signature so the parent can render an explorer link. */
@@ -182,6 +192,10 @@ export function PickWinnerModal({
           bountyTitle:
             bounty.title ?? `${bounty.repo} #${bounty.issueNumber}`,
           bountyAmount: bounty.amountUsdc,
+          // GHB-127: branding snapshot for the bell on the dev side.
+          companyId: companyBranding?.companyId,
+          companyName: companyBranding?.companyName,
+          companyAvatarUrl: companyBranding?.companyAvatarUrl,
         },
       });
 
