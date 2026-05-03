@@ -15,9 +15,14 @@ export {
   SandboxDisabledError,
 } from "./fly.js";
 
+export { detectTestRunner } from "./detector.js";
+
 export type {
   SandboxConfig,
   SandboxHandle,
   SandboxResult,
   SpawnOptions,
+  RunnerKind,
+  RunnerSpec,
+  DetectOptions,
 } from "./types.js";

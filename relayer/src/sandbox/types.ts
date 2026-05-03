@@ -93,3 +93,58 @@ export type SandboxResult =
       reason: string;
       durationMs: number;
     };
+
+// ── GHB-71: test runner detector ──────────────────────────────────────
+
+/**
+ * Every test runner the sandbox image knows how to invoke. `custom`
+ * is the escape hatch the company config gets to override everything
+ * (per the GHB-71 ticket: "Fallback: comando custom definido por la
+ * empresa"). When the detector returns `custom`, the command is
+ * executed via `sh -c` so it can include pipes, env, redirection, etc.
+ */
+export type RunnerKind =
+  | "anchor"
+  | "forge"
+  | "cargo"
+  | "go"
+  | "pnpm"
+  | "yarn"
+  | "npm"
+  | "pytest"
+  | "custom";
+
+/**
+ * What the detector returns. Consumed by GHB-72's executor, which
+ * spawns the command inside the sandbox machine and captures
+ * stdout/stderr/exit code.
+ *
+ * `cwd` is RELATIVE to the cloned repo root — empty string means the
+ * repo root itself. Always relative so the executor stays in control
+ * of absolute paths inside the machine.
+ */
+export interface RunnerSpec {
+  kind: RunnerKind;
+  /**
+   * argv form (no shell escaping needed). The executor passes this
+   * directly to the OS — no `sh -c` wrapper unless `kind === "custom"`,
+   * which has shell features baked in.
+   */
+  command: string[];
+  cwd: string;
+  /**
+   * Marker files / signals that triggered this match. Used for logs
+   * and for the future "detector explained itself" UI surface.
+   */
+  markers: string[];
+}
+
+export interface DetectOptions {
+  /**
+   * If set (non-empty after trim), takes absolute precedence over
+   * auto-detection. Sourced from the bounty config when the company
+   * needs to override the heuristic (monorepo subdir, custom test
+   * harness, etc.).
+   */
+  customCommand?: string | null;
+}
