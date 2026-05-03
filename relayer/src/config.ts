@@ -51,6 +51,32 @@ function loadScorerKeypair(): Keypair {
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
 
+/**
+ * GHB-58 second-opinion config — GenLayer BountyJudge integration.
+ *
+ * `bountyJudgeContract` is the deployed address on the chain we point
+ * to via `genlayerRpc`. When unset (null), the relayer SKIPS the
+ * GenLayer call entirely and falls back to Sonnet-only — useful for
+ * local dev or while the GenLayer side is being iterated on.
+ *
+ * `genlayerPrivateKey` is the EVM-shaped private key the relayer signs
+ * GenLayer txs with. It pays gas (zero on studionet, non-zero on
+ * testnet/mainnet). Distinct from the Solana scorer keypair on
+ * purpose: blowing one doesn't blow the other.
+ */
+export interface GenLayerConfig {
+  rpcUrl: string;
+  bountyJudgeContract: string | null;
+  privateKey: `0x${string}` | null;
+  /**
+   * How long to wait (seconds) for the BountyJudge tx to reach a
+   * decided state (ACCEPTED / FINALIZED / UNDETERMINED). Default 300s
+   * because studionet's full leader+validators round routinely takes
+   * 2-4 minutes with the slower LLM providers in the validator pool.
+   */
+  pollTimeoutS: number;
+}
+
 export interface RelayerConfig {
   rpcUrl: string;
   wsUrl: string;
@@ -62,6 +88,7 @@ export interface RelayerConfig {
   chainId: string;
   anthropicApiKey: string | null;
   anthropicModel: string;
+  genlayer: GenLayerConfig;
 }
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929";
@@ -85,6 +112,23 @@ export function loadConfig(): RelayerConfig {
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY?.trim() || null;
   const anthropicModel = process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL;
 
+  // GenLayer second-opinion: all three must be set to enable. When
+  // contract or key is missing we treat it as feature-disabled and the
+  // submission handler skips the call without erroring.
+  const glRpc = process.env.GENLAYER_RPC?.trim() || "https://studio.genlayer.com/api";
+  const glContractRaw = process.env.BOUNTY_JUDGE_CONTRACT?.trim() || null;
+  const glContract = glContractRaw && /^0x[0-9a-fA-F]{40}$/.test(glContractRaw)
+    ? glContractRaw
+    : null;
+  const glKeyRaw = process.env.GENLAYER_PRIVATE_KEY?.trim() || null;
+  const glKey = glKeyRaw && /^0x[0-9a-fA-F]{64}$/.test(glKeyRaw)
+    ? (glKeyRaw as `0x${string}`)
+    : null;
+  // Studionet's leader+validators round can take 2-4 minutes when LLM
+  // providers are slow. 300s is a safe default that still surfaces real
+  // hangs without cutting off legitimate consensus rounds.
+  const glPollTimeout = Number(process.env.GENLAYER_POLL_TIMEOUT_S ?? "300");
+
   return {
     rpcUrl,
     wsUrl,
@@ -96,5 +140,13 @@ export function loadConfig(): RelayerConfig {
     chainId,
     anthropicApiKey,
     anthropicModel,
+    genlayer: {
+      rpcUrl: glRpc,
+      bountyJudgeContract: glContract,
+      privateKey: glKey,
+      pollTimeoutS: Number.isFinite(glPollTimeout) && glPollTimeout > 0
+        ? glPollTimeout
+        : 300,
+    },
   };
 }

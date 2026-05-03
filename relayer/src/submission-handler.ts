@@ -1,6 +1,7 @@
 import { type Db } from "@ghbounty/db";
 
 import { analyzeSubmission, type AnalyzeResult } from "./analyzer.js";
+import { type GenLayerConfig } from "./config.js";
 import {
   getBountyDisplayInfo,
   getEvaluationCriteria,
@@ -15,6 +16,11 @@ import {
   upsertAutoRejectReview,
   upsertSubmission,
 } from "./db/ops.js";
+import {
+  submitToBountyJudge,
+  type BountyJudgeResult,
+} from "./genlayer/client.js";
+import { buildNarrativeReport } from "./genlayer/narrative.js";
 import { log } from "./logger.js";
 import { type ScorerClient } from "./scorer.js";
 import { classifyByThreshold, type ThresholdOutcome } from "./threshold.js";
@@ -32,8 +38,19 @@ export interface SubmissionHandlerDeps {
   /** Anthropic key (null disables Opus path; relayer falls back to stub). */
   anthropicApiKey: string | null;
   anthropicModel: string;
+  /**
+   * GHB-58: GenLayer second-opinion config. Pass `null` to disable.
+   * When the contract or key is unset, the handler skips the call
+   * entirely and the evaluation row keeps `genlayer_*` null.
+   */
+  genlayer?: GenLayerConfig | null;
   /** For tests: inject the analyzer so we don't hit real APIs. */
   analyze?: typeof analyzeSubmission;
+  /**
+   * For tests: inject the GenLayer call so we don't hit a real chain.
+   * Must match the shape of the real `submitToBountyJudge`.
+   */
+  callGenLayer?: typeof submitToBountyJudge;
 }
 
 export interface HandleSubmissionResult {
@@ -105,6 +122,37 @@ export async function handleSubmission(
     },
   );
 
+  // ── Threshold + auto-reject mark FIRST ─────────────────────────────────
+  //
+  // Bug we're fixing: we used to call `setScore` first, then mark the
+  // submission auto_rejected. If `setScore` threw (UnauthorizedScorer on
+  // bounties created with a stale scorer pubkey, devnet RPC blip, etc.)
+  // the handler crashed and NEVER wrote the auto_rejected flag — the
+  // company's review modal kept showing low-score PRs forever because
+  // `submission_reviews.auto_rejected = false` (default).
+  //
+  // Now we compute the outcome + write the off-chain mark BEFORE the
+  // on-chain call. The off-chain mark is what the company UI reads;
+  // the on-chain set_score is for the program's view of the world. The
+  // two are independent — failing one doesn't and shouldn't unmark the
+  // other.
+  let threshold: number | null = null;
+  let outcome: ThresholdOutcome = "pass";
+  if (deps.db) {
+    threshold = await getRejectThreshold(deps.db, sub.bounty.toBase58());
+    outcome = classifyByThreshold(score, threshold);
+    if (outcome === "auto_rejected") {
+      log.info("submission auto-rejected by threshold", {
+        submission: sub.pda.toBase58(),
+        score,
+        threshold,
+      });
+      await markAutoRejected(deps.db, sub.pda.toBase58());
+    } else {
+      await markScored(deps.db, sub.pda.toBase58());
+    }
+  }
+
   // Race: another relayer instance (typically the deployed one on
   // Railway/Fly while local dev is also running) may have called
   // `set_score` while we were busy with Sonnet. The Anchor program rejects
@@ -123,26 +171,65 @@ export async function handleSubmission(
         ourScore: score,
       });
       txHash = "raced"; // sentinel; insertEvaluation just persists it as a string
+    } else if (msg.includes("UnauthorizedScorer") || msg.includes("Error Number: 6007")) {
+      // Bounty was created by a frontend pointing at a different scorer
+      // pubkey (legacy config). On-chain we can never write the score —
+      // but the off-chain auto-reject mark above DID land, which is
+      // what the UI cares about. Log + persist a sentinel tx_hash so
+      // the eval row still gets written and downstream notifications
+      // fire normally.
+      log.warn("set_score blocked by UnauthorizedScorer — on-chain score skipped", {
+        submission: sub.pda.toBase58(),
+        bounty: sub.bounty.toBase58(),
+      });
+      txHash = "unauthorized_scorer";
     } else {
       throw err;
     }
   }
 
-  let threshold: number | null = null;
-  let outcome: ThresholdOutcome = "pass";
   if (deps.db) {
-    threshold = await getRejectThreshold(deps.db, sub.bounty.toBase58());
-    outcome = classifyByThreshold(score, threshold);
-    if (outcome === "auto_rejected") {
-      log.info("submission auto-rejected by threshold", {
-        submission: sub.pda.toBase58(),
-        score,
-        threshold,
-      });
-      await markAutoRejected(deps.db, sub.pda.toBase58());
-    } else {
-      await markScored(deps.db, sub.pda.toBase58());
+    // GHB-58: ask GenLayer's BountyJudge for a second opinion. Only
+    // makes sense when we have a structured report (Opus path) — stub
+    // evaluations have nothing to forward. Best-effort: a failure or
+    // timeout doesn't undo the Sonnet score, it just leaves the
+    // genlayer_* columns null and we surface the reason in the log.
+    let genlayerVerdict: BountyJudgeResult | null = null;
+    if (
+      report &&
+      deps.genlayer?.bountyJudgeContract &&
+      deps.genlayer.privateKey
+    ) {
+      const narrative = buildNarrativeReport(report);
+      const callGenLayer = deps.callGenLayer ?? submitToBountyJudge;
+      try {
+        genlayerVerdict = await callGenLayer(
+          deps.genlayer,
+          sub.pda.toBase58(),
+          narrative,
+        );
+        if (genlayerVerdict.outcome === "success") {
+          log.info("genlayer second opinion landed", {
+            submission: sub.pda.toBase58(),
+            sonnetScore: score,
+            genlayerScore: genlayerVerdict.score,
+            txHash: genlayerVerdict.txHash,
+          });
+        } else {
+          log.warn("genlayer second opinion did not settle", {
+            submission: sub.pda.toBase58(),
+            outcome: genlayerVerdict.outcome,
+            message: genlayerVerdict.message,
+          });
+        }
+      } catch (err) {
+        log.warn("genlayer call threw", {
+          submission: sub.pda.toBase58(),
+          err: String(err),
+        });
+      }
     }
+
     await insertEvaluation(deps.db, {
       submissionPda: sub.pda.toBase58(),
       source,
@@ -151,6 +238,15 @@ export async function handleSubmission(
       report,
       reportHash,
       txHash,
+      genlayer:
+        genlayerVerdict?.outcome === "success"
+          ? {
+              score: genlayerVerdict.score,
+              status: genlayerVerdict.status,
+              dimensions: genlayerVerdict.dimensions,
+              txHash: genlayerVerdict.txHash,
+            }
+          : null,
     });
     // GHB-96: rerank the issue's submissions. A newly-scored entry can
     // displace an existing #1, and an auto_rejected one needs its old rank

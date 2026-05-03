@@ -548,4 +548,160 @@ describe("handleSubmission", () => {
     const analyzeArgs = analyze.mock.calls[0]![0];
     expect(analyzeArgs.evaluationCriteria).toBeNull();
   });
+
+  /* ============================================================== */
+  /* GHB-58: GenLayer second-opinion integration                     */
+  /* ============================================================== */
+
+  /**
+   * Default config used in the GenLayer tests below — feature ENABLED
+   * (contract + key set) but the actual call is mocked via
+   * `deps.callGenLayer`, so the real RPC is never touched.
+   */
+  const enabledGenLayerCfg = {
+    rpcUrl: "https://studio.genlayer.com/api",
+    bountyJudgeContract: "0x" + "1".repeat(40),
+    privateKey: ("0x" + "2".repeat(64)) as `0x${string}`,
+    pollTimeoutS: 30,
+  };
+
+  test("genlayer disabled (null contract): no call, eval row has nulls", async () => {
+    const state = fakeDb({});
+    const db = buildDrizzleProxy(state);
+    const callGenLayer = vi.fn();
+    const analyze = vi.fn(async () => opusResult);
+
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: buildScorer().client,
+      analyze,
+      genlayer: { ...enabledGenLayerCfg, bountyJudgeContract: null },
+      callGenLayer,
+    });
+
+    expect(callGenLayer).not.toHaveBeenCalled();
+    const evalCall = state.calls.find(
+      (c) =>
+        c.kind === "insert" &&
+        (c.payload as { payload: { source?: string } }).payload?.source ===
+          "opus",
+    );
+    const payload = (evalCall!.payload as { payload: Record<string, unknown> })
+      .payload;
+    expect(payload.genlayerScore).toBeNull();
+    expect(payload.genlayerStatus).toBeNull();
+    expect(payload.genlayerDimensions).toBeNull();
+    expect(payload.genlayerTxHash).toBeNull();
+  });
+
+  test("genlayer success: verdict persisted alongside Sonnet score", async () => {
+    const state = fakeDb({});
+    const db = buildDrizzleProxy(state);
+    const callGenLayer = vi.fn(async () => ({
+      outcome: "success" as const,
+      txHash: "0xdeadbeef",
+      status: "passed" as const,
+      score: 8,
+      dimensions: {
+        code_quality: 8,
+        test_coverage: 7,
+        requirements_match: 9,
+        security: 6,
+      },
+    }));
+    const analyze = vi.fn(async () => opusResult);
+
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: buildScorer().client,
+      analyze,
+      genlayer: enabledGenLayerCfg,
+      callGenLayer,
+    });
+
+    expect(callGenLayer).toHaveBeenCalledOnce();
+    // Second arg = submission PDA, third arg = narrative report (the
+    // scrubbed text built from opus.report). It must NOT contain the
+    // numeric scores from the Opus report.
+    const callArgs = callGenLayer.mock.calls[0]!;
+    expect(typeof callArgs[1]).toBe("string"); // submission_id
+    const narrative = callArgs[2] as string;
+    expect(narrative).toContain("## Summary");
+    expect(narrative).not.toMatch(/\b[0-9]+\b/); // numbers were scrubbed
+
+    // Evaluation row should carry the GenLayer verdict.
+    const evalCall = state.calls.find(
+      (c) =>
+        c.kind === "insert" &&
+        (c.payload as { payload: { source?: string } }).payload?.source ===
+          "opus",
+    );
+    const payload = (evalCall!.payload as { payload: Record<string, unknown> })
+      .payload;
+    expect(payload.genlayerScore).toBe(8);
+    expect(payload.genlayerStatus).toBe("passed");
+    expect(payload.genlayerTxHash).toBe("0xdeadbeef");
+    expect(payload.genlayerDimensions).toEqual({
+      code_quality: 8,
+      test_coverage: 7,
+      requirements_match: 9,
+      security: 6,
+    });
+  });
+
+  test("genlayer timeout: handler doesn't throw, eval row has nulls", async () => {
+    const state = fakeDb({});
+    const db = buildDrizzleProxy(state);
+    const callGenLayer = vi.fn(async () => ({
+      outcome: "timeout" as const,
+      txHash: "0xabc",
+      message: "polling exceeded 30s",
+    }));
+    const analyze = vi.fn(async () => opusResult);
+
+    const r = await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: buildScorer().client,
+      analyze,
+      genlayer: enabledGenLayerCfg,
+      callGenLayer,
+    });
+
+    // Sonnet's score still wins on the main path — GenLayer timeout is
+    // best-effort and shouldn't break the relayer.
+    expect(r.score).toBe(7);
+    expect(r.outcome).toBe("pass");
+    const evalCall = state.calls.find(
+      (c) =>
+        c.kind === "insert" &&
+        (c.payload as { payload: { source?: string } }).payload?.source ===
+          "opus",
+    );
+    const payload = (evalCall!.payload as { payload: Record<string, unknown> })
+      .payload;
+    expect(payload.genlayerScore).toBeNull();
+    expect(payload.genlayerStatus).toBeNull();
+    expect(payload.genlayerTxHash).toBeNull();
+  });
+
+  test("genlayer skipped on stub path (no report to forward)", async () => {
+    const state = fakeDb({});
+    const db = buildDrizzleProxy(state);
+    const callGenLayer = vi.fn();
+
+    // No `analyze` override → falls back to stub since anthropicApiKey
+    // is null in baseDeps. Stub path returns report=null.
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: buildScorer().client,
+      genlayer: enabledGenLayerCfg,
+      callGenLayer,
+    });
+
+    expect(callGenLayer).not.toHaveBeenCalled();
+  });
 });

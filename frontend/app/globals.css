@@ -3308,4 +3308,168 @@ section { position: relative; padding: 120px 40px; }
   .earnings-payment-title { max-width: 200px; }
 }
 
+/* =========================================================
+   GHB-58 — GenLayer second-opinion card on submission detail
+   ========================================================= */
+.genlayer-card {
+  /* The card lives between the eval body and the decision panel.
+   * Same surface treatment as the other profile cards but a slightly
+   * stronger border so the "this is GenLayer" framing reads as distinct. */
+  border-color: var(--border-strong);
+  gap: 18px;
+}
+.genlayer-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 16px;
+}
+.genlayer-tagline {
+  margin-top: 8px;
+  max-width: 520px;
+  font-size: 13px;
+}
+
+.genlayer-agreement {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11.5px; font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-strong);
+}
+.genlayer-agreement-aligned {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.08);
+  border-color: rgba(74, 222, 128, 0.3);
+}
+.genlayer-agreement-near {
+  color: var(--accent);
+  background: rgba(0, 229, 209, 0.06);
+}
+.genlayer-agreement-divergent {
+  color: #ffb454;
+  background: rgba(255, 180, 84, 0.08);
+  border-color: rgba(255, 180, 84, 0.3);
+}
+.genlayer-agreement-unknown {
+  color: var(--text-dim);
+}
+
+.genlayer-overall {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(0, 229, 209, 0.04);
+  border: 1px solid var(--border);
+}
+.genlayer-overall-cell {
+  display: flex; flex-direction: column; gap: 4px;
+  flex: 1;
+}
+.genlayer-overall-label {
+  font-size: 11px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.genlayer-overall-value {
+  font-size: 24px; font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text);
+  line-height: 1;
+}
+.genlayer-overall-arrow {
+  font-size: 13px; color: var(--text-dim);
+  font-style: italic;
+}
+.genlayer-overall-delta {
+  margin-left: auto;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 14px; font-weight: 700;
+  border: 1px solid var(--border);
+}
+.genlayer-delta-aligned    { color: #4ade80; border-color: rgba(74, 222, 128, 0.3); }
+.genlayer-delta-near       { color: var(--accent); border-color: rgba(0, 229, 209, 0.3); }
+.genlayer-delta-divergent  { color: #ffb454; border-color: rgba(255, 180, 84, 0.3); }
+.genlayer-delta-unknown    { color: var(--text-dim); }
+
+.genlayer-dim-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.genlayer-dim-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border);
+}
+.genlayer-dim-big {
+  /* highlight rows where Sonnet and GenLayer materially disagreed (≥ 2) */
+  border-color: rgba(255, 180, 84, 0.3);
+  background: rgba(255, 180, 84, 0.04);
+}
+.genlayer-dim-label {
+  font-size: 13px; color: var(--text);
+}
+.genlayer-dim-pair {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.genlayer-dim-sonnet,
+.genlayer-dim-gl {
+  min-width: 18px; text-align: center;
+}
+.genlayer-dim-sonnet { color: var(--text-dim); }
+.genlayer-dim-gl     { color: var(--text); font-weight: 600; }
+.genlayer-dim-arrow  { color: var(--text-dim); font-size: 11px; }
+.genlayer-dim-delta {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-dim);
+  min-width: 32px; text-align: right;
+}
+.genlayer-dim-delta-big {
+  color: #ffb454;
+  font-weight: 600;
+}
+
+.genlayer-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.genlayer-tx-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-dim);
+  text-decoration: none;
+  padding: 6px 10px; border-radius: 6px;
+  border: 1px solid var(--border);
+  transition: color .15s, border-color .15s;
+}
+.genlayer-tx-link:hover {
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+.genlayer-tx-link .mono-inline {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+@media (max-width: 700px) {
+  .genlayer-head { flex-direction: column; align-items: stretch; }
+  .genlayer-overall { flex-wrap: wrap; }
+  .genlayer-overall-delta { margin-left: 0; }
+  .genlayer-dim-row {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+  }
+  .genlayer-dim-delta { grid-column: 2; grid-row: 2; text-align: right; }
+}
+
 
