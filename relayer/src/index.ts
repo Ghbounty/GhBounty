@@ -29,6 +29,10 @@ async function runOnce(): Promise<never> {
   const cfg = loadConfig();
   setLogLevel(cfg.logLevel);
 
+  // Diagnostic: surface whether GITHUB_TOKEN was loaded so a 403 rate
+  // limit doesn't masquerade as a token-missing problem (or vice versa).
+  // We log only the presence + length, never the token itself.
+  const ghToken = process.env.GITHUB_TOKEN?.trim();
   log.info("relayer starting", {
     rpcUrl: cfg.rpcUrl,
     wsUrl: cfg.wsUrl,
@@ -37,6 +41,17 @@ async function runOnce(): Promise<never> {
     stubScore: cfg.stubScore,
     anthropic: cfg.anthropicApiKey
       ? { enabled: true, model: cfg.anthropicModel }
+      : { enabled: false },
+    githubToken: ghToken
+      ? { present: true, length: ghToken.length }
+      : { present: false },
+    genlayer: cfg.genlayer.bountyJudgeContract
+      ? {
+          enabled: true,
+          contract: cfg.genlayer.bountyJudgeContract,
+          rpc: cfg.genlayer.rpcUrl,
+          pollTimeoutS: cfg.genlayer.pollTimeoutS,
+        }
       : { enabled: false },
   });
 
@@ -72,6 +87,10 @@ async function runOnce(): Promise<never> {
       stubScore: cfg.stubScore,
       anthropicApiKey: cfg.anthropicApiKey,
       anthropicModel: cfg.anthropicModel,
+      // GHB-58: pass the GenLayer config through. The handler skips
+      // the call when contract or key is null, so this is safe even
+      // when the operator hasn't set the env vars yet.
+      genlayer: cfg.genlayer,
     }).then(() => undefined);
 
   await processBacklog(connection, client.getProgram(), handler);

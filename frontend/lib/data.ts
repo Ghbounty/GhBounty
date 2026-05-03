@@ -878,6 +878,24 @@ export type SubmissionDetail = {
   /** On-chain tx signature for the payout, when the bounty resolved
    *  to this submission. null otherwise. */
   payoutTxHash: string | null;
+  /**
+   * GHB-58: GenLayer second-opinion verdict. Null when the relayer
+   * didn't call GenLayer for this submission (feature disabled,
+   * consensus timed out, etc.). When present, the page renders a side-
+   * by-side comparison: Sonnet score vs GenLayer score + per-dimension
+   * deltas + a deep-link to the GenLayer tx.
+   */
+  genlayer: {
+    score: number;
+    status: "passed" | "rejected_by_genlayer";
+    dimensions: {
+      code_quality: number;
+      test_coverage: number;
+      requirements_match: number;
+      security: number;
+    };
+    txHash: string;
+  } | null;
 };
 
 export async function fetchSubmissionDetail(
@@ -901,6 +919,7 @@ export async function fetchSubmissionDetail(
       scoreSource: null,
       passedCount: null,
       payoutTxHash: null,
+      genlayer: null,
     };
   }
 
@@ -943,7 +962,9 @@ export async function fetchSubmissionDetail(
       .maybeSingle(),
     supabase
       .from("evaluations" as never)
-      .select("submission_pda, source, score, reasoning, report, created_at")
+      .select(
+        "submission_pda, source, score, reasoning, report, genlayer_score, genlayer_status, genlayer_dimensions, genlayer_tx_hash, created_at",
+      )
       .eq("submission_pda", subRow.pda)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -955,6 +976,14 @@ export async function fetchSubmissionDetail(
     score: number | null;
     reasoning: string | null;
     report: OpusReport | null;
+    genlayer_score: number | null;
+    genlayer_status: string | null;
+    genlayer_dimensions: SubmissionDetail["genlayer"] extends infer T
+      ? T extends { dimensions: infer D }
+        ? D | null
+        : never
+      : never;
+    genlayer_tx_hash: string | null;
   } | null) ?? null;
 
   const winnerSubId = winnerByPda.get(subRow.issue_pda);
@@ -1011,6 +1040,27 @@ export async function fetchSubmissionDetail(
     }
   }
 
+  // GHB-58: build the GenLayer verdict block when all four columns are
+  // present. Partial fills shouldn't happen (the relayer writes them
+  // atomically) but we treat any missing field as "no verdict" to be
+  // resilient.
+  const glScore = evalRow?.genlayer_score ?? null;
+  const glStatus = evalRow?.genlayer_status ?? null;
+  const glDims = evalRow?.genlayer_dimensions ?? null;
+  const glTx = evalRow?.genlayer_tx_hash ?? null;
+  const genlayer =
+    typeof glScore === "number" &&
+    (glStatus === "passed" || glStatus === "rejected_by_genlayer") &&
+    glDims &&
+    glTx
+      ? {
+          score: glScore,
+          status: glStatus,
+          dimensions: glDims,
+          txHash: glTx,
+        }
+      : null;
+
   return {
     submission,
     bounty,
@@ -1020,6 +1070,7 @@ export async function fetchSubmissionDetail(
     scoreSource: evalRow?.source ?? null,
     passedCount,
     payoutTxHash: subRow.tx_hash ?? null,
+    genlayer,
   };
 }
 

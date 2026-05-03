@@ -115,7 +115,7 @@ function Inner({ id }: { id: string }) {
   }
 
   const { submission, bounty, company, report, reasoning, scoreSource,
-    passedCount, payoutTxHash } = data;
+    passedCount, payoutTxHash, genlayer } = data;
   const granular = submission.granularStatus ?? "submitted";
   const score = submission.score;
   const rank = submission.rank;
@@ -252,6 +252,24 @@ function Inner({ id }: { id: string }) {
           )}
         </div>
       </div>
+
+      {/* ---- GenLayer second opinion ---- */}
+      {genlayer && (
+        <GenLayerSecondOpinion
+          genlayer={genlayer}
+          sonnetScore={typeof score === "number" ? score : null}
+          sonnetDimensions={
+            report
+              ? {
+                  code_quality: report.code_quality?.score ?? null,
+                  test_coverage: report.test_coverage?.score ?? null,
+                  requirements_match: report.requirements_match?.score ?? null,
+                  security: report.security?.score ?? null,
+                }
+              : null
+          }
+        />
+      )}
 
       {/* ---- Decision panel ---- */}
       {granular === "auto_rejected" && (
@@ -429,6 +447,160 @@ function ReportPanel({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * GHB-58 second-opinion card.
+ *
+ * Shows the GenLayer BountyJudge verdict next to the Sonnet score so the
+ * dev (and the company) can see that two independent evaluators
+ * looked at the PR and what each concluded. Per-dimension deltas are
+ * highlighted when divergence is meaningful (|Δ| ≥ 2).
+ *
+ * Why this card lives here, not inside the Evaluation card:
+ *   - The Evaluation card is dense already (4-axis bars + reasoning per
+ *     axis + summary). Stuffing GenLayer in there would crowd it.
+ *   - The second-opinion message is its own narrative — "two evaluators
+ *     looked at this independently, here's how they agreed/disagreed".
+ *     That deserves its own framing.
+ */
+function GenLayerSecondOpinion({
+  genlayer,
+  sonnetScore,
+  sonnetDimensions,
+}: {
+  genlayer: NonNullable<SubmissionDetail["genlayer"]>;
+  sonnetScore: number | null;
+  sonnetDimensions: {
+    code_quality: number | null;
+    test_coverage: number | null;
+    requirements_match: number | null;
+    security: number | null;
+  } | null;
+}) {
+  const overallDelta =
+    sonnetScore != null ? genlayer.score - sonnetScore : null;
+  const overallAgreement =
+    overallDelta == null
+      ? "unknown"
+      : Math.abs(overallDelta) <= 1
+        ? "aligned"
+        : Math.abs(overallDelta) <= 2
+          ? "near"
+          : "divergent";
+
+  const dimRows = (
+    [
+      "code_quality",
+      "test_coverage",
+      "requirements_match",
+      "security",
+    ] as const
+  ).map((key) => ({
+    key,
+    label: DIMENSION_LABELS[key],
+    sonnet: sonnetDimensions?.[key] ?? null,
+    genlayer: genlayer.dimensions[key],
+  }));
+
+  return (
+    <section className="profile-card genlayer-card">
+      <div className="genlayer-head">
+        <div>
+          <h2 className="section-label">GenLayer second opinion</h2>
+          <p className="modal-note genlayer-tagline">
+            Independent on-chain verdict from {`5`} validators (different
+            LLM providers each). Used as a coherence check on top of the
+            Sonnet evaluation, not as the authoritative score.
+          </p>
+        </div>
+        <span className={`genlayer-agreement genlayer-agreement-${overallAgreement}`}>
+          {overallAgreement === "aligned" && "✓ Aligned"}
+          {overallAgreement === "near" && "≈ Near agreement"}
+          {overallAgreement === "divergent" && "△ Divergent"}
+          {overallAgreement === "unknown" && "—"}
+        </span>
+      </div>
+
+      <div className="genlayer-overall">
+        <div className="genlayer-overall-cell">
+          <span className="genlayer-overall-label">Sonnet</span>
+          <span className="genlayer-overall-value">
+            {sonnetScore != null ? `${sonnetScore}/10` : "—"}
+          </span>
+        </div>
+        <div className="genlayer-overall-arrow">vs</div>
+        <div className="genlayer-overall-cell">
+          <span className="genlayer-overall-label">GenLayer</span>
+          <span className="genlayer-overall-value">
+            {`${genlayer.score}/10`}
+          </span>
+        </div>
+        {overallDelta != null && (
+          <div
+            className={`genlayer-overall-delta genlayer-delta-${overallAgreement}`}
+            title="Difference between Sonnet's score and GenLayer's consensus"
+          >
+            {overallDelta > 0 ? `+${overallDelta}` : `${overallDelta}`}
+          </div>
+        )}
+      </div>
+
+      <ul className="genlayer-dim-list">
+        {dimRows.map((d) => {
+          const delta =
+            d.sonnet != null ? d.genlayer - d.sonnet : null;
+          const big = delta != null && Math.abs(delta) >= 2;
+          return (
+            <li
+              key={d.key}
+              className={`genlayer-dim-row ${big ? "genlayer-dim-big" : ""}`}
+            >
+              <span className="genlayer-dim-label">{d.label}</span>
+              <span className="genlayer-dim-pair">
+                <span className="genlayer-dim-sonnet">
+                  {d.sonnet != null ? d.sonnet : "—"}
+                </span>
+                <span className="genlayer-dim-arrow">→</span>
+                <span className="genlayer-dim-gl">{d.genlayer}</span>
+              </span>
+              {delta != null && (
+                <span
+                  className={`genlayer-dim-delta ${big ? "genlayer-dim-delta-big" : ""}`}
+                >
+                  {delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "="}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      <div className="genlayer-foot">
+        <span
+          className={`status-badge ${
+            genlayer.status === "passed"
+              ? "granular-approved"
+              : "granular-auto-rejected"
+          }`}
+        >
+          ●{" "}
+          {genlayer.status === "passed"
+            ? "GenLayer: passed"
+            : "GenLayer: rejected"}
+        </span>
+        <a
+          href={`https://studio.genlayer.com/transactions/${genlayer.txHash}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="genlayer-tx-link"
+          title={genlayer.txHash}
+        >
+          On-chain verdict ↗ <span className="mono-inline">{shortAddr(genlayer.txHash)}</span>
+        </a>
+      </div>
+    </section>
   );
 }
 

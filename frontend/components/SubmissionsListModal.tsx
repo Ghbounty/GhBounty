@@ -91,20 +91,35 @@ export function SubmissionsListModal({
       (s) => s.state === "winner" || s.review?.approved === true,
     ) ?? false;
 
-  // GHB-85: split visible vs hidden cards by the auto_rejected flag.
-  // The default view drops auto-rejected; the toggle (when there's at
-  // least one) brings them back into the list with a muted treatment.
-  const autoRejectedCount =
-    items?.filter((s) => s.review?.autoRejected === true).length ?? 0;
-  const visibleItems = items
-    ? showAutoRejected
-      ? items
-      : items.filter((s) => !s.review?.autoRejected)
-    : null;
-
   const effectiveThreshold = effectiveRejectThreshold(
     bounty.rejectThreshold,
   );
+
+  // GHB-85 + auto-reject hardening: a submission is "below threshold"
+  // when EITHER the relayer wrote `auto_rejected=true` (canonical path)
+  // OR the score is below the threshold but the flag was never written
+  // (relayer crash mid-handler, set_score race, legacy bounty whose
+  // scorer pubkey doesn't match the current relayer's keypair, etc).
+  // The fallback prevents the company review modal from showing junk
+  // submissions even when the off-chain mark is missing.
+  const isBelowThreshold = (s: EnrichedSubmission): boolean => {
+    if (s.review?.autoRejected === true) return true;
+    if (
+      effectiveThreshold != null &&
+      s.evaluation?.score != null &&
+      s.evaluation.score < effectiveThreshold
+    ) {
+      return true;
+    }
+    return false;
+  };
+  const autoRejectedCount =
+    items?.filter(isBelowThreshold).length ?? 0;
+  const visibleItems = items
+    ? showAutoRejected
+      ? items
+      : items.filter((s) => !isBelowThreshold(s))
+    : null;
   const settledStatus =
     bounty.status === "approved" ||
     bounty.status === "paid" ||

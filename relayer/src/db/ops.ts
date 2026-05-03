@@ -228,6 +228,24 @@ export interface InsertEvaluationInput {
   reportHash?: string;
   retryCount?: number;
   txHash?: string;
+  /**
+   * GHB-58: optional GenLayer BountyJudge "second-opinion" verdict.
+   * Omit (or pass null) when the relayer didn't call GenLayer (feature
+   * disabled, contract unreachable, consensus timed out). When set, all
+   * four fields land together — partial fills aren't supported by the
+   * contract response shape so we don't model that case here.
+   */
+  genlayer?: {
+    score: number;
+    status: "passed" | "rejected_by_genlayer";
+    dimensions: {
+      code_quality: number;
+      test_coverage: number;
+      requirements_match: number;
+      security: number;
+    };
+    txHash: string;
+  } | null;
 }
 
 export async function insertEvaluation(
@@ -243,6 +261,10 @@ export async function insertEvaluation(
     reportHash: input.reportHash || null,
     retryCount: input.retryCount ?? 0,
     txHash: input.txHash,
+    genlayerScore: input.genlayer?.score ?? null,
+    genlayerStatus: input.genlayer?.status ?? null,
+    genlayerDimensions: input.genlayer?.dimensions ?? null,
+    genlayerTxHash: input.genlayer?.txHash ?? null,
   });
 }
 

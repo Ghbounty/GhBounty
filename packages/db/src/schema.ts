@@ -126,6 +126,22 @@ export const evaluations = pgTable("evaluations", {
   reportHash: text("report_hash"),
   retryCount: integer("retry_count").notNull().default(0),
   txHash: text("tx_hash"),
+  /**
+   * GHB-58: GenLayer BountyJudge "second-opinion" verdict, joined 1:1 with
+   * the Sonnet evaluation row. Null when the relayer didn't call GenLayer
+   * (feature disabled, contract unreachable, consensus timed out). When
+   * present, the frontend renders "Sonnet 6 / GenLayer 7" side-by-side.
+   *
+   *   genlayerScore       — consensed integer 1-10 from the contract
+   *   genlayerStatus      — "passed" | "rejected_by_genlayer"
+   *   genlayerDimensions  — { code_quality, test_coverage,
+   *                           requirements_match, security }
+   *   genlayerTxHash      — 0x... GenLayer tx hash, links to the on-chain audit
+   */
+  genlayerScore: smallint("genlayer_score"),
+  genlayerStatus: text("genlayer_status"),
+  genlayerDimensions: jsonb("genlayer_dimensions"),
+  genlayerTxHash: text("genlayer_tx_hash"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .default(sql`now()`)
     .notNull(),
