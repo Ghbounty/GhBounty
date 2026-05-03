@@ -24,6 +24,7 @@ import type {
   Company,
   Dev,
   Submission,
+  SubmissionGranularStatus,
   SubmissionStatus,
 } from "./types";
 import { effectiveRejectThreshold } from "./constants";
@@ -518,9 +519,11 @@ export async function fetchBountiesByCompany(
 
 type SubmissionRow = {
   id: string;
+  pda: string;
   pr_url: string;
   issue_pda: string;
-  state: "pending" | "scored" | "winner";
+  state: "pending" | "scored" | "winner" | "auto_rejected";
+  rank: number | null;
   created_at: string;
   submission_meta: {
     note: string | null;
@@ -531,8 +534,13 @@ type SubmissionRow = {
 // `submissions.issue_pda` is a plain text column with no FK constraint, so
 // PostgREST can't auto-embed `issues`. We fetch submissions, then resolve
 // the matching issue UUIDs in a second round-trip via `issues.pda`.
+//
+// GHB-90 added `pda` (to join evaluations) and `rank` (for "#N of M").
+// `rank` and the `auto_rejected` enum value aren't in the generated
+// db.types.ts yet — `as string` cast on the select string keeps the
+// typed builder quiet without regenerating types here.
 const SUBMISSION_SELECT =
-  "id, pr_url, issue_pda, state, created_at, submission_meta(note, submitted_by_user_id)";
+  "id, pda, pr_url, issue_pda, state, rank, created_at, submission_meta(note, submitted_by_user_id)";
 
 function parseGithubPrUrl(url: string): { prRepo: string; prNumber: number } {
   const m = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
@@ -556,6 +564,35 @@ type SubmissionReviewRow = {
   approval_feedback: string | null;
 };
 
+/**
+ * GHB-90: derive the dev-facing granular lifecycle. Order matters — we
+ * collapse to the strongest signal:
+ *
+ *   approved > lost > auto_rejected > rejected > scored > evaluating > submitted
+ *
+ * `lost` ranks above the rejection states because if both a winner exists
+ * AND the company also wrote a manual reject for this row, the bounty
+ * being closed is the more useful headline (the dev knows they can't win
+ * regardless). `lost` ranks below `approved` because the dev's own win
+ * trumps everything.
+ */
+function deriveGranularStatus(
+  status: SubmissionStatus,
+  review: SubmissionReviewRow | null | undefined,
+  hasEvalRow: boolean,
+  hasScore: boolean,
+): SubmissionGranularStatus {
+  if (status === "accepted") return "approved";
+  if (status === "lost") return "lost";
+  if (status === "rejected") {
+    return review?.auto_rejected ? "auto_rejected" : "rejected";
+  }
+  // pending: split on whether the relayer pipeline has touched it yet.
+  if (hasScore) return "scored";
+  if (hasEvalRow) return "evaluating";
+  return "submitted";
+}
+
 function rowToSubmission(
   row: SubmissionRow,
   bountyId: string,
@@ -568,6 +605,13 @@ function rowToSubmission(
    * lookups) keep their existing behaviour.
    */
   bountyAwardedToOther = false,
+  /**
+   * GHB-90 hydration. Pass `null` when the caller didn't fetch
+   * evaluations — `granularStatus` collapses to "submitted" but the UI
+   * still works with the coarse `status`.
+   */
+  evaluation: SubmissionScore | null = null,
+  totalForBounty: number | null = null,
 ): Submission {
   const { prRepo, prNumber } = parseGithubPrUrl(row.pr_url);
   // Status precedence: Accepted > Rejected > Lost > Pending.
@@ -588,6 +632,15 @@ function rowToSubmission(
   else if (review?.rejected) status = "rejected";
   else if (bountyAwardedToOther) status = "lost";
 
+  const hasEvalRow = !!evaluation;
+  const hasScore = typeof evaluation?.score === "number";
+  const granularStatus = deriveGranularStatus(
+    status,
+    review,
+    hasEvalRow,
+    hasScore,
+  );
+
   return {
     id: row.id,
     bountyId,
@@ -606,6 +659,11 @@ function rowToSubmission(
         ? review.approval_feedback
         : undefined,
     autoRejected: review?.auto_rejected ?? false,
+    granularStatus,
+    score: evaluation?.score ?? null,
+    scoreSource: evaluation?.source ?? null,
+    rank: row.rank ?? null,
+    totalForBounty,
     createdAt: new Date(row.created_at).getTime(),
   };
 }
@@ -684,12 +742,16 @@ export async function fetchSubmissionsByDev(
   }
   const rows = data ?? [];
   const pdas = Array.from(new Set(rows.map((r) => r.issue_pda)));
-  const [idByPda, winnerByPda] = await Promise.all([
+  const [idByPda, winnerByPda, totalByPda] = await Promise.all([
     resolveIssueIdsByPda(supabase, pdas),
     // GHB-92 follow-up: per-bounty "who won?" so we can flip the dev's
     // own submission to "lost" when the bounty has been awarded to
     // somebody else. Cheap (one extra query, scoped to the dev's PDAs).
     findApprovedSubmissionByPda(supabase, pdas),
+    // GHB-90: total competing submissions per bounty so the row can
+    // render "Rank #2 of 5". We already had `countSubmissionsByIssuePda`
+    // for the marketplace; reuse it here scoped to the dev's PDAs.
+    countSubmissionsByIssuePda(supabase, pdas),
   ]);
   // GHB-84: hydrate the company's review decision so the dev sees the
   // "Rejected" status + feedback on their own submissions list. The
@@ -723,6 +785,34 @@ export async function fetchSubmissionsByDev(
       });
     }
   }
+  // GHB-90: pull evaluations for the dev's submission PDAs so we can
+  // surface the score, source and granular status. One IN query, keep
+  // the newest row per PDA (matches the company-side fetcher's "newest
+  // wins" rule). `evaluations` isn't in db.types.ts — `as never` cast.
+  const subPdas = rows.map((r) => r.pda);
+  const evalByPda = new Map<string, SubmissionScore>();
+  if (subPdas.length > 0) {
+    const { data: evalRows } = await supabase
+      .from("evaluations" as never)
+      .select("submission_pda, source, score, reasoning, created_at")
+      .in("submission_pda", subPdas)
+      .order("created_at", { ascending: false });
+    const list = (evalRows as unknown as Array<{
+      submission_pda: string;
+      source: string | null;
+      score: number | null;
+      reasoning: string | null;
+      created_at: string;
+    }>) ?? [];
+    for (const e of list) {
+      if (evalByPda.has(e.submission_pda)) continue; // newest wins
+      evalByPda.set(e.submission_pda, {
+        score: typeof e.score === "number" ? e.score : null,
+        source: e.source ?? null,
+        reasoning: e.reasoning ?? null,
+      });
+    }
+  }
   return rows.map((row) => {
     const winnerSubId = winnerByPda.get(row.issue_pda);
     const bountyAwardedToOther =
@@ -732,8 +822,201 @@ export async function fetchSubmissionsByDev(
       idByPda.get(row.issue_pda) ?? "",
       reviewById.get(row.id) ?? null,
       bountyAwardedToOther,
+      evalByPda.get(row.pda) ?? null,
+      totalByPda.get(row.issue_pda) ?? null,
     );
   });
+}
+
+/* ---------------------------------------------------------------- */
+/* GHB-91: submission detail page                                     */
+/* ---------------------------------------------------------------- */
+
+/** One Opus dimension. Mirrors `relayer/src/opus.ts:DimensionScore`. */
+export type OpusDimension = {
+  score: number;
+  reasoning: string;
+};
+
+/** Structured Opus report shape — what the relayer writes into
+ *  `evaluations.report` (jsonb). Mirrors `OpusReport` in the relayer. */
+export type OpusReport = {
+  code_quality: OpusDimension;
+  test_coverage: OpusDimension;
+  requirements_match: OpusDimension;
+  security: OpusDimension;
+  summary: string;
+};
+
+/**
+ * Full submission detail for `/app/submissions/[id]` (GHB-91). Combines
+ * the dev's submission + the parent bounty + company branding + the
+ * full Opus evaluation report (4 dimensions + summary) + payment info
+ * (tx_hash if won, derived from `submissions.tx_hash`).
+ *
+ * `null` is returned when the row doesn't exist or the caller isn't
+ * authorized to read it (RLS).
+ */
+export type SubmissionDetail = {
+  submission: Submission;
+  bounty: Bounty | null;
+  company: Company | null;
+  /** Full report (4 dimensions + summary). null when no eval row. */
+  report: OpusReport | null;
+  /** Free-form reasoning column from `evaluations`. Falls back to the
+   *  report's summary when present. */
+  reasoning: string | null;
+  /** "opus", "stub", "genlayer". */
+  scoreSource: string | null;
+  /** Number of submissions on this bounty whose score >= reject_threshold.
+   *  Used to render "#X above threshold". null when no threshold set. */
+  passedCount: number | null;
+  /** On-chain tx signature for the payout, when the bounty resolved
+   *  to this submission. null otherwise. */
+  payoutTxHash: string | null;
+};
+
+export async function fetchSubmissionDetail(
+  submissionId: string,
+): Promise<SubmissionDetail | null> {
+  if (!useRealBackend) {
+    // Mock path: best-effort lookup from localStorage. We don't have
+    // evaluations/reports in the mock, so the detail page degrades to
+    // "Pending evaluation". Sufficient for dev-bypass screens.
+    const all = mockLoadSubmissions();
+    const sub = all.find((s) => s.id === submissionId);
+    if (!sub) return null;
+    const bounties = mockLoadBounties();
+    const bounty = bounties.find((b) => b.id === sub.bountyId) ?? null;
+    return {
+      submission: sub,
+      bounty,
+      company: null,
+      report: null,
+      reasoning: null,
+      scoreSource: null,
+      passedCount: null,
+      payoutTxHash: null,
+    };
+  }
+
+  const supabase = createClient();
+
+  // 1. Submission row + meta + tx_hash. We refetch via `id` instead of
+  //    routing through fetchSubmissionsByDev so the page works for any
+  //    submission the viewer has SELECT access to.
+  const { data: subRaw, error: subErr } = await supabase
+    .from("submissions")
+    .select(
+      `${SUBMISSION_SELECT}, tx_hash`,
+    )
+    .eq("id", submissionId)
+    .single();
+  if (subErr || !subRaw) {
+    if (subErr) console.error("[fetchSubmissionDetail:submission]", subErr);
+    return null;
+  }
+  const subRow = subRaw as unknown as SubmissionRow & { tx_hash: string | null };
+
+  // 2. Resolve issue uuid + bounty + winner + total + threshold.
+  const idByPda = await resolveIssueIdsByPda(supabase, [subRow.issue_pda]);
+  const bountyId = idByPda.get(subRow.issue_pda) ?? "";
+  const [winnerByPda, totalByPda, bounty] = await Promise.all([
+    findApprovedSubmissionByPda(supabase, [subRow.issue_pda]),
+    countSubmissionsByIssuePda(supabase, [subRow.issue_pda]),
+    bountyId ? fetchBounty(bountyId) : Promise.resolve(null),
+  ]);
+
+  // 3. Review row + evaluation (with full report). Same `as never`
+  //    cast pattern used elsewhere for relayer-managed tables.
+  const [reviewQ, evalQ] = await Promise.all([
+    supabase
+      .from("submission_reviews" as never)
+      .select(
+        "submission_id, rejected, approved, auto_rejected, reject_reason, approval_feedback",
+      )
+      .eq("submission_id", submissionId)
+      .maybeSingle(),
+    supabase
+      .from("evaluations" as never)
+      .select("submission_pda, source, score, reasoning, report, created_at")
+      .eq("submission_pda", subRow.pda)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const reviewRow = (reviewQ.data as unknown as SubmissionReviewRow | null) ?? null;
+  const evalRow = (evalQ.data as unknown as {
+    source: string | null;
+    score: number | null;
+    reasoning: string | null;
+    report: OpusReport | null;
+  } | null) ?? null;
+
+  const winnerSubId = winnerByPda.get(subRow.issue_pda);
+  const bountyAwardedToOther =
+    winnerSubId != null && winnerSubId !== subRow.id;
+  const evaluation: SubmissionScore | null = evalRow
+    ? {
+        score: evalRow.score,
+        source: evalRow.source,
+        reasoning: evalRow.reasoning,
+      }
+    : null;
+
+  const submission = rowToSubmission(
+    subRow,
+    bountyId,
+    reviewRow,
+    bountyAwardedToOther,
+    evaluation,
+    totalByPda.get(subRow.issue_pda) ?? null,
+  );
+
+  // 4. Company branding via the bounty's owner. Cheap single-row read.
+  const company =
+    bounty?.companyId ? await fetchCompany(bounty.companyId) : null;
+
+  // 5. "Above threshold" count: how many submissions on this bounty
+  //    scored >= bounty.reject_threshold (or >= DEFAULT when not set).
+  //    Skipped when the bounty doesn't exist; surfaces as null in the
+  //    UI which renders "—".
+  let passedCount: number | null = null;
+  if (bounty) {
+    const threshold = bounty.rejectThreshold ?? null;
+    if (threshold != null) {
+      const { data: pass } = await supabase
+        .from("evaluations" as never)
+        .select("submission_pda, score")
+        .gte("score", threshold);
+      const passList = (pass as unknown as Array<{
+        submission_pda: string;
+        score: number;
+      }>) ?? [];
+      // Filter to submissions on THIS bounty (one query, JS filter is
+      // cheaper than two joins for the small N we have here).
+      const ourPdas = new Set([subRow.pda]);
+      // Refetch the bounty's submission PDAs — already implied by
+      // countSubmissionsByIssuePda, but we need the pdas not the count.
+      const { data: subList } = await supabase
+        .from("submissions")
+        .select("pda")
+        .eq("issue_pda", subRow.issue_pda);
+      for (const r of subList ?? []) ourPdas.add(r.pda);
+      passedCount = passList.filter((p) => ourPdas.has(p.submission_pda)).length;
+    }
+  }
+
+  return {
+    submission,
+    bounty,
+    company,
+    report: evalRow?.report ?? null,
+    reasoning: evalRow?.reasoning ?? null,
+    scoreSource: evalRow?.source ?? null,
+    passedCount,
+    payoutTxHash: subRow.tx_hash,
+  };
 }
 
 /* ---------------------------------------------------------------- */
