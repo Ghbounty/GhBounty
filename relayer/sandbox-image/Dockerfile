@@ -10,11 +10,14 @@
 # final image is ~2-2.5 GB; Fly caches it on each host so cold-start
 # only pays the pull once per host.
 #
-# Build & push (run from repo root):
+# Build & push (run from repo root). Bump the tag whenever this file
+# OR runner.mjs / entrypoint.sh changes, so the relayer can pin a
+# specific version via FLY_SANDBOX_IMAGE and we never roll forward
+# silently in production:
 #   cd relayer/sandbox-image
 #   flyctl auth docker                       # one-time, pipes creds to docker
-#   docker build --platform linux/amd64 -t registry.fly.io/ghbounty-sandbox:v1 .
-#   docker push registry.fly.io/ghbounty-sandbox:v1
+#   docker build --platform linux/amd64 -t registry.fly.io/ghbounty-sandbox:v2 .
+#   docker push registry.fly.io/ghbounty-sandbox:v2
 #
 # We pin --platform=linux/amd64 because Fly machines are x86_64 and
 # building on Apple Silicon would otherwise produce arm64 binaries
@@ -100,10 +103,11 @@ RUN mkdir -p /work
 WORKDIR /work
 
 COPY entrypoint.sh /usr/local/bin/sandbox-entrypoint
-RUN chmod +x /usr/local/bin/sandbox-entrypoint
+COPY runner.mjs    /usr/local/bin/sandbox-runner.mjs
+RUN chmod +x /usr/local/bin/sandbox-entrypoint /usr/local/bin/sandbox-runner.mjs
 
-# Default command: invoke the entrypoint, which checks for a SANDBOX_*
-# env spec. With no spec, the entrypoint prints toolchain versions and
-# exits cleanly — useful for `flyctl machines run` smoke tests of the
-# image itself.
+# Default command: invoke the entrypoint. With SANDBOX_SPEC unset it
+# falls back to the smoke-test path (toolchain versions); with the spec
+# set it `exec`s the node runner that does clone + detect + install +
+# test + JSON output. See entrypoint.sh and runner.mjs.
 CMD ["/usr/local/bin/sandbox-entrypoint"]
