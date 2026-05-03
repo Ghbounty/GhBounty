@@ -247,6 +247,7 @@ function Inner({ id }: { id: string }) {
             <ReportPanel
               report={report}
               source={scoreSource ?? "opus"}
+              company={company}
             />
           )}
         </div>
@@ -355,9 +356,14 @@ function EvalPlaceholder({
 function ReportPanel({
   report,
   source,
+  company,
 }: {
   report: OpusReport;
   source: string;
+  /** GHB-127: company that posted this bounty. When present we tag the
+   * report header with their logo + name so the dev sees "Evaluated for
+   * Acme" rather than a stand-alone system message. */
+  company: SubmissionDetail["company"];
 }) {
   const dims = (Object.keys(DIMENSION_WEIGHTS) as Array<
     keyof typeof DIMENSION_WEIGHTS
@@ -375,6 +381,25 @@ function ReportPanel({
         <span className="field-label">Evaluator</span>
         <span className="mono-inline">{source}</span>
       </div>
+      {company && (
+        <div className="report-panel-brand">
+          <Avatar
+            src={company.avatarUrl}
+            name={company.name}
+            size={24}
+            rounded={false}
+          />
+          <span className="report-panel-brand-text">
+            Evaluated for{" "}
+            <Link
+              href={`/app/companies/${encodeURIComponent(company.id)}`}
+              className="accent"
+            >
+              {company.name}
+            </Link>
+          </span>
+        </div>
+      )}
       <ul className="report-dims">
         {dims.map((d) => (
           <li key={d.key} className="report-dim">

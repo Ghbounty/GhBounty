@@ -227,6 +227,18 @@ export function SubmissionsListModal({
           bounty={bounty}
           submission={pickFor}
           reviewerUserId={user.id}
+          // GHB-127: branding snapshot for the dev's notification. The
+          // viewer here IS the company, so we read it straight off
+          // useAuth() rather than a separate fetch.
+          companyBranding={
+            user.role === "company"
+              ? {
+                  companyId: user.id,
+                  companyName: user.name,
+                  companyAvatarUrl: user.avatarUrl,
+                }
+              : undefined
+          }
           onClose={() => setPickFor(null)}
           onResolved={() => {
             setPickFor(null);
@@ -240,6 +252,15 @@ export function SubmissionsListModal({
           bounty={bounty}
           submission={rejectFor}
           reviewerUserId={user.id}
+          companyBranding={
+            user.role === "company"
+              ? {
+                  companyId: user.id,
+                  companyName: user.name,
+                  companyAvatarUrl: user.avatarUrl,
+                }
+              : undefined
+          }
           onClose={() => setRejectFor(null)}
           onRejected={() => {
             setRejectFor(null);

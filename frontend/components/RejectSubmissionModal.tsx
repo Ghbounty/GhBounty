@@ -26,6 +26,7 @@ export function RejectSubmissionModal({
   bounty,
   submission,
   reviewerUserId,
+  companyBranding,
   onClose,
   onRejected,
 }: {
@@ -37,6 +38,12 @@ export function RejectSubmissionModal({
   /** Privy DID of the logged-in company user — passed to the DB layer
    * for audit (`submission_reviews.decided_by`). */
   reviewerUserId: string;
+  /** GHB-127: snapshot of company branding for the dev's notification. */
+  companyBranding?: {
+    companyId: string;
+    companyName: string;
+    companyAvatarUrl: string | undefined;
+  };
   onClose: () => void;
   /** Called after a successful upsert. The parent re-fetches the
    * submissions list to pick up the new `review` field. */
@@ -84,6 +91,10 @@ export function RejectSubmissionModal({
           bountyTitle:
             bounty.title ?? `${bounty.repo} #${bounty.issueNumber}`,
           bountyAmount: bounty.amountUsdc,
+          // GHB-127: company branding snapshot for the bell.
+          companyId: companyBranding?.companyId,
+          companyName: companyBranding?.companyName,
+          companyAvatarUrl: companyBranding?.companyAvatarUrl,
         },
       });
       onRejected();
@@ -102,6 +113,7 @@ export function RejectSubmissionModal({
     bounty.repo,
     bounty.issueNumber,
     bounty.amountUsdc,
+    companyBranding,
     onRejected,
   ]);
 

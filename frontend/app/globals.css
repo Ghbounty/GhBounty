@@ -859,6 +859,55 @@ section { position: relative; padding: 120px 40px; }
   color: var(--text-dim);
   margin-top: 2px;
 }
+/* GHB-127: company branding inside the notif row.
+ * The avatar replaces the dot when a notification carries a company
+ * snapshot in its payload; we tuck a small accent-coloured tag in the
+ * bottom-right corner so the kind (approved / rejected / scored / …)
+ * is still scannable without reading the title. */
+.notif-avatar {
+  position: relative;
+  flex-shrink: 0;
+  margin-top: 2px;
+  width: 28px; height: 28px;
+}
+.notif-avatar .avatar { border-radius: 6px; }
+.notif-avatar .avatar-img,
+.notif-avatar .avatar-fallback { border-radius: 6px; }
+.notif-avatar-tag {
+  position: absolute;
+  right: -2px; bottom: -2px;
+  width: 10px; height: 10px;
+  border-radius: 999px;
+  border: 2px solid var(--surface);
+  /* The .notif-dot-* classes set the actual fill colour. */
+}
+.notif-company {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* GHB-127: company branding inside the report panel of /app/submissions/[id]. */
+.report-panel-brand {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 229, 209, 0.04);
+  border: 1px solid var(--border);
+  align-self: flex-start;
+}
+.report-panel-brand-text {
+  font-size: 12.5px; color: var(--text-dim);
+}
+.report-panel-brand-text .accent {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+.report-panel-brand-text .accent:hover { text-decoration: underline; }
 
 /* ---- avatar ---- */
 .avatar { display: inline-block; flex-shrink: 0; }

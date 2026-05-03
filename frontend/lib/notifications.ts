@@ -47,6 +47,18 @@ export type NotificationPayload = {
   score?: number;
   /** Reject threshold the score was compared against, for auto-rejects. */
   threshold?: number;
+  /**
+   * GHB-127: company branding embedded at write-time so the bell can
+   * render the company logo + name without a JOIN on read. We persist a
+   * snapshot, not a live reference — if the company later changes their
+   * logo or name, old notifications keep the original (acceptable: the
+   * notif is a historical record of the moment the action happened).
+   */
+  companyName?: string;
+  /** Company logo URL snapshot. Optional — bell falls back to initials. */
+  companyAvatarUrl?: string;
+  /** Company id, used to deep-link the notif row to the company page. */
+  companyId?: string;
 };
 
 export type Notification = {

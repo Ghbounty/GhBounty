@@ -301,6 +301,19 @@ export async function getSubmittedByUserId(
 export interface BountyDisplayInfo {
   title: string | null;
   amount: number | string;
+  /**
+   * GHB-127: company branding snapshot, joined from
+   * `bounty_meta.created_by_user_id → companies.user_id`. Persisted on
+   * notif payloads so the dev's bell can render the company logo + name
+   * without an extra fetch.
+   *
+   * All three are nullable: legacy bounties created before
+   * `bounty_meta` existed, or companies that never filled out their
+   * profile (no logo). The bell falls back to initials in that case.
+   */
+  companyId: string | null;
+  companyName: string | null;
+  companyAvatarUrl: string | null;
 }
 
 export async function getBountyDisplayInfo(
@@ -309,24 +322,35 @@ export async function getBountyDisplayInfo(
 ): Promise<BountyDisplayInfo | null> {
   const rows = await db.execute(
     sql`
-      SELECT bm.title AS title, i.amount AS amount
+      SELECT bm.title       AS title,
+             i.amount        AS amount,
+             c.user_id       AS company_id,
+             c.name          AS company_name,
+             c.logo_url      AS company_avatar_url
         FROM issues i
         LEFT JOIN bounty_meta bm ON bm.issue_id = i.id
+        LEFT JOIN companies   c  ON c.user_id   = bm.created_by_user_id
        WHERE i.pda = ${issuePda}
        LIMIT 1
     `,
   );
-  const list = (rows as unknown as {
-    rows?: Array<{ title: string | null; amount: number | string }>;
-  }).rows;
-  const flat = Array.isArray(rows) ? rows : list ?? [];
-  const first = flat[0] as
-    | { title?: string | null; amount?: number | string }
-    | undefined;
+  type Row = {
+    title?: string | null;
+    amount?: number | string;
+    company_id?: string | null;
+    company_name?: string | null;
+    company_avatar_url?: string | null;
+  };
+  const list = (rows as unknown as { rows?: Row[] }).rows;
+  const flat = Array.isArray(rows) ? (rows as Row[]) : list ?? [];
+  const first = flat[0];
   if (!first) return null;
   return {
     title: first.title ?? null,
     amount: first.amount ?? 0,
+    companyId: first.company_id ?? null,
+    companyName: first.company_name ?? null,
+    companyAvatarUrl: first.company_avatar_url ?? null,
   };
 }
 
