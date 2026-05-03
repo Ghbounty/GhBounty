@@ -1,0 +1,29 @@
+# CODEOWNERS — automatic reviewer assignment for ghbounty.
+#
+# Format: <pattern> <@user-or-team>
+# - The LAST matching pattern wins per file.
+# - Globs are bash-style; `**` recurses, `*` matches a single segment.
+# - Patterns relative to the repo root.
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: anyone touching the repo without a more specific match
+*                       @tomazzi14
+
+# Solana on-chain program (Anchor / Rust)
+/contracts/             @tomazzi14
+
+# TypeScript relayer (Sonnet eval + Solana scorer + GenLayer client)
+/relayer/               @tomazzi14
+
+# Next.js frontend (App Router, Privy auth, Supabase client)
+/frontend/              @tomazzi14
+
+# Shared packages (DB schema + migrations, diff filter, types)
+/packages/              @tomazzi14
+
+# GenLayer BountyJudge contract (Python)
+/bounty_judge/          @tomazzi14
+
+# Repo config + CI + this file
+/.github/               @tomazzi14
