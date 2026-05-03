@@ -53,6 +53,17 @@ async function runOnce(): Promise<never> {
           pollTimeoutS: cfg.genlayer.pollTimeoutS,
         }
       : { enabled: false },
+    sandbox: cfg.sandbox.apiToken && cfg.sandbox.appName
+      ? {
+          enabled: true,
+          app: cfg.sandbox.appName,
+          image: cfg.sandbox.image,
+          region: cfg.sandbox.region,
+          timeoutS: cfg.sandbox.timeoutS,
+          cpus: cfg.sandbox.cpus,
+          memoryMb: cfg.sandbox.memoryMb,
+        }
+      : { enabled: false },
   });
 
   const connection = new Connection(cfg.rpcUrl, {
@@ -91,6 +102,10 @@ async function runOnce(): Promise<never> {
       // the call when contract or key is null, so this is safe even
       // when the operator hasn't set the env vars yet.
       genlayer: cfg.genlayer,
+      // GHB-73: pass the Fly sandbox config through. The handler
+      // skips the spawn when token or app are null and falls back to
+      // the "no test results available" prompt path.
+      sandbox: cfg.sandbox,
     }).then(() => undefined);
 
   await processBacklog(connection, client.getProgram(), handler);
