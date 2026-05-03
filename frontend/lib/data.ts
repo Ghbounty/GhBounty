@@ -524,6 +524,7 @@ type SubmissionRow = {
   issue_pda: string;
   state: "pending" | "scored" | "winner" | "auto_rejected";
   rank: number | null;
+  tx_hash: string | null;
   created_at: string;
   submission_meta: {
     note: string | null;
@@ -536,11 +537,13 @@ type SubmissionRow = {
 // the matching issue UUIDs in a second round-trip via `issues.pda`.
 //
 // GHB-90 added `pda` (to join evaluations) and `rank` (for "#N of M").
-// `rank` and the `auto_rejected` enum value aren't in the generated
-// db.types.ts yet — `as string` cast on the select string keeps the
-// typed builder quiet without regenerating types here.
+// GHB-93 added `tx_hash` so the earnings dashboard can show the payout
+// explorer link per submission without an extra round-trip.
+// `rank`, `tx_hash` and the `auto_rejected` enum value aren't in the
+// generated db.types.ts yet — `as string` cast on the select string
+// keeps the typed builder quiet without regenerating types here.
 const SUBMISSION_SELECT =
-  "id, pda, pr_url, issue_pda, state, rank, created_at, submission_meta(note, submitted_by_user_id)";
+  "id, pda, pr_url, issue_pda, state, rank, tx_hash, created_at, submission_meta(note, submitted_by_user_id)";
 
 function parseGithubPrUrl(url: string): { prRepo: string; prNumber: number } {
   const m = url.match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
@@ -664,6 +667,7 @@ function rowToSubmission(
     scoreSource: evaluation?.source ?? null,
     rank: row.rank ?? null,
     totalForBounty,
+    payoutTxHash: row.tx_hash ?? null,
     createdAt: new Date(row.created_at).getTime(),
   };
 }
@@ -902,21 +906,21 @@ export async function fetchSubmissionDetail(
 
   const supabase = createClient();
 
-  // 1. Submission row + meta + tx_hash. We refetch via `id` instead of
-  //    routing through fetchSubmissionsByDev so the page works for any
-  //    submission the viewer has SELECT access to.
+  // 1. Submission row + meta. `tx_hash` is now part of SUBMISSION_SELECT
+  //    (GHB-93) so the payment row + earnings dashboard share one query
+  //    shape. We refetch via `id` instead of routing through
+  //    fetchSubmissionsByDev so the page works for any submission the
+  //    viewer has SELECT access to.
   const { data: subRaw, error: subErr } = await supabase
     .from("submissions")
-    .select(
-      `${SUBMISSION_SELECT}, tx_hash`,
-    )
+    .select(SUBMISSION_SELECT)
     .eq("id", submissionId)
     .single();
   if (subErr || !subRaw) {
     if (subErr) console.error("[fetchSubmissionDetail:submission]", subErr);
     return null;
   }
-  const subRow = subRaw as unknown as SubmissionRow & { tx_hash: string | null };
+  const subRow = subRaw as unknown as SubmissionRow;
 
   // 2. Resolve issue uuid + bounty + winner + total + threshold.
   const idByPda = await resolveIssueIdsByPda(supabase, [subRow.issue_pda]);
@@ -1015,7 +1019,7 @@ export async function fetchSubmissionDetail(
     reasoning: evalRow?.reasoning ?? null,
     scoreSource: evalRow?.source ?? null,
     passedCount,
-    payoutTxHash: subRow.tx_hash,
+    payoutTxHash: subRow.tx_hash ?? null,
   };
 }
 
