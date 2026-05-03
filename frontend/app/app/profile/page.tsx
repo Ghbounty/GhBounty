@@ -246,12 +246,88 @@ function DevProfile() {
     return m;
   }, [companiesAll]);
 
-  const totalEarned = submissions
-    .filter((s) => s.status === "accepted")
-    .reduce((sum, s) => {
+  /**
+   * GHB-93: derive earnings stats up here so the EarningsPanel and the
+   * submission counters stay in sync. We split:
+   *   - paid:    accepted + tx_hash present  → counted as real income
+   *   - pending: accepted, tx_hash still null → "in flight" (relayer
+   *              hasn't confirmed the payout, or `assisted` mode hasn't
+   *              executed `resolve_bounty` yet)
+   *
+   * Bounties without a matching `Bounty` row in `bountiesById` are
+   * skipped — the marketplace fetch may have lagged behind the
+   * submission fetch (rare race), and double-counting an unknown amount
+   * is worse than under-counting briefly.
+   */
+  const earnings = useMemo(() => {
+    const accepted = submissions.filter((s) => s.status === "accepted");
+    const paidRows: Array<{ submission: Submission; bounty: Bounty; company?: Company }> = [];
+    const pendingRows: Array<{ submission: Submission; bounty: Bounty }> = [];
+    for (const s of accepted) {
       const b = bountiesById.get(s.bountyId);
-      return b ? sum + b.amountUsdc : sum;
-    }, 0);
+      if (!b) continue;
+      if (s.payoutTxHash) {
+        paidRows.push({
+          submission: s,
+          bounty: b,
+          company: companiesById.get(b.companyId),
+        });
+      } else {
+        pendingRows.push({ submission: s, bounty: b });
+      }
+    }
+    const paidTotal = paidRows.reduce((sum, r) => sum + r.bounty.amountUsdc, 0);
+    const pendingTotal = pendingRows.reduce(
+      (sum, r) => sum + r.bounty.amountUsdc,
+      0,
+    );
+    const best = paidRows.reduce(
+      (max, r) => (r.bounty.amountUsdc > max ? r.bounty.amountUsdc : max),
+      0,
+    );
+    const avg = paidRows.length > 0 ? paidTotal / paidRows.length : 0;
+    const winRate =
+      submissions.length > 0
+        ? Math.round((accepted.length / submissions.length) * 100)
+        : 0;
+    const totalSubmissions = submissions.length;
+    // Top 3 companies by lifetime payout. Tiny dataset (tens of rows) so
+    // a Map + sort is plenty.
+    const byCompany = new Map<string, { name: string; avatarUrl?: string; total: number; wins: number }>();
+    for (const r of paidRows) {
+      const key = r.bounty.companyId;
+      const cur =
+        byCompany.get(key) ?? {
+          name: r.company?.name ?? "Unknown company",
+          avatarUrl: r.company?.avatarUrl,
+          total: 0,
+          wins: 0,
+        };
+      cur.total += r.bounty.amountUsdc;
+      cur.wins += 1;
+      byCompany.set(key, cur);
+    }
+    const topCompanies = Array.from(byCompany.entries())
+      .map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 3);
+    return {
+      paidRows: paidRows.sort(
+        (a, b) => b.submission.createdAt - a.submission.createdAt,
+      ),
+      pendingRows,
+      paidTotal,
+      pendingTotal,
+      best,
+      avg,
+      winRate,
+      acceptedCount: accepted.length,
+      totalSubmissions,
+      topCompanies,
+    };
+  }, [submissions, bountiesById, companiesById]);
+  // Kept for the "Earned SOL" pill copy; same number as earnings.paidTotal.
+  const totalEarned = earnings.paidTotal;
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -382,9 +458,7 @@ function DevProfile() {
           <span className="stat-lbl">Submissions</span>
         </div>
         <div className="stat-pill">
-          <span className="stat-val">
-            {submissions.filter((s) => s.status === "accepted").length}
-          </span>
+          <span className="stat-val">{earnings.acceptedCount}</span>
           <span className="stat-lbl">Accepted</span>
         </div>
         <div className="stat-pill">
@@ -393,11 +467,221 @@ function DevProfile() {
         </div>
       </div>
 
+      <EarningsPanel earnings={earnings} />
+
       <DevSubmissionsList
         submissions={submissions}
         bountiesById={bountiesById}
         companiesById={companiesById}
       />
+    </div>
+  );
+}
+
+/**
+ * GHB-93: earnings dashboard for the dev profile.
+ *
+ * Splits accepted submissions into "paid" (tx_hash present, real
+ * income) and "pending payout" (accepted, relayer hasn't executed
+ * `resolve_bounty` yet — only relevant on `assisted` mode bounties or
+ * during the brief window between the company's pick and the on-chain
+ * confirm).
+ *
+ * Three sub-sections:
+ *   1. KPI grid — paid total, pending, win rate, avg, best
+ *   2. Recent payments — last 5 payouts with explorer links
+ *   3. Top companies — who has paid you most
+ *
+ * Empty state (no accepted submissions yet) collapses to a single
+ * encouraging line — we don't want to render a wall of zeros.
+ */
+type EarningsData = {
+  paidRows: Array<{ submission: Submission; bounty: Bounty; company?: Company }>;
+  pendingRows: Array<{ submission: Submission; bounty: Bounty }>;
+  paidTotal: number;
+  pendingTotal: number;
+  best: number;
+  avg: number;
+  winRate: number;
+  acceptedCount: number;
+  totalSubmissions: number;
+  topCompanies: Array<{
+    id: string;
+    name: string;
+    avatarUrl?: string;
+    total: number;
+    wins: number;
+  }>;
+};
+
+function EarningsPanel({ earnings }: { earnings: EarningsData }) {
+  const hasAnyAccepted = earnings.acceptedCount > 0;
+  if (!hasAnyAccepted) {
+    return (
+      <section className="profile-card earnings-card">
+        <h2 className="section-label">Earnings</h2>
+        <p className="modal-note">
+          You haven&apos;t earned any payouts yet. Win a bounty and your
+          payments will appear here with on-chain explorer links.
+        </p>
+      </section>
+    );
+  }
+
+  const recent = earnings.paidRows.slice(0, 5);
+  return (
+    <section className="profile-card earnings-card">
+      <div className="earnings-head">
+        <h2 className="section-label">Earnings</h2>
+        <span className="earnings-head-aux">
+          {earnings.paidRows.length} payout
+          {earnings.paidRows.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      <div className="earnings-grid">
+        <EarningsKpi
+          label="Paid"
+          value={`${earnings.paidTotal.toLocaleString()} SOL`}
+          aux="lifetime"
+        />
+        <EarningsKpi
+          label="Pending payout"
+          value={
+            earnings.pendingTotal > 0
+              ? `${earnings.pendingTotal.toLocaleString()} SOL`
+              : "—"
+          }
+          aux={
+            earnings.pendingRows.length > 0
+              ? `${earnings.pendingRows.length} bounty${
+                  earnings.pendingRows.length === 1 ? "" : "ies"
+                }`
+              : "all settled"
+          }
+        />
+        <EarningsKpi
+          label="Win rate"
+          value={`${earnings.winRate}%`}
+          aux={`${earnings.acceptedCount} of ${earnings.totalSubmissions} submission${earnings.totalSubmissions === 1 ? "" : "s"}`}
+        />
+        <EarningsKpi
+          label="Avg payout"
+          value={
+            earnings.avg > 0
+              ? `${earnings.avg.toLocaleString(undefined, {
+                  maximumFractionDigits: 2,
+                })} SOL`
+              : "—"
+          }
+          aux="per win"
+        />
+        <EarningsKpi
+          label="Best win"
+          value={earnings.best > 0 ? `${earnings.best.toLocaleString()} SOL` : "—"}
+          aux="single payout"
+        />
+      </div>
+
+      {recent.length > 0 && (
+        <div className="earnings-sub">
+          <div className="earnings-sub-head">
+            <h3 className="earnings-sub-title">Recent payments</h3>
+          </div>
+          <ul className="earnings-payments">
+            {recent.map((r) => (
+              <li key={r.submission.id} className="earnings-payment">
+                <div className="earnings-payment-left">
+                  {r.company && (
+                    <Avatar
+                      src={r.company.avatarUrl}
+                      name={r.company.name}
+                      size={28}
+                      rounded={false}
+                    />
+                  )}
+                  <div className="earnings-payment-meta">
+                    <Link
+                      href={`/app/submissions/${r.submission.id}`}
+                      className="earnings-payment-title"
+                    >
+                      {r.bounty.title ?? `${r.bounty.repo} #${r.bounty.issueNumber}`}
+                    </Link>
+                    <span className="earnings-payment-sub">
+                      {r.company?.name ?? r.bounty.repo} ·{" "}
+                      {new Date(r.submission.createdAt).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+                <div className="earnings-payment-right">
+                  <span className="earnings-payment-amount">
+                    +{r.bounty.amountUsdc.toLocaleString()} SOL
+                  </span>
+                  {r.submission.payoutTxHash && (
+                    <a
+                      href={`https://explorer.solana.com/tx/${r.submission.payoutTxHash}?cluster=devnet`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="earnings-payment-tx"
+                      title={r.submission.payoutTxHash}
+                    >
+                      Tx ↗
+                    </a>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {earnings.topCompanies.length > 0 && (
+        <div className="earnings-sub">
+          <div className="earnings-sub-head">
+            <h3 className="earnings-sub-title">Top companies</h3>
+          </div>
+          <ul className="earnings-top">
+            {earnings.topCompanies.map((c) => (
+              <li key={c.id} className="earnings-top-row">
+                <Link
+                  href={`/app/companies/${encodeURIComponent(c.id)}`}
+                  className="earnings-top-left"
+                >
+                  <Avatar
+                    src={c.avatarUrl}
+                    name={c.name}
+                    size={28}
+                    rounded={false}
+                  />
+                  <span className="earnings-top-name">{c.name}</span>
+                </Link>
+                <span className="earnings-top-meta">
+                  {c.wins} win{c.wins === 1 ? "" : "s"} ·{" "}
+                  <strong>{c.total.toLocaleString()} SOL</strong>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function EarningsKpi({
+  label,
+  value,
+  aux,
+}: {
+  label: string;
+  value: string;
+  aux?: string;
+}) {
+  return (
+    <div className="earnings-kpi">
+      <span className="earnings-kpi-label">{label}</span>
+      <span className="earnings-kpi-value">{value}</span>
+      {aux && <span className="earnings-kpi-aux">{aux}</span>}
     </div>
   );
 }

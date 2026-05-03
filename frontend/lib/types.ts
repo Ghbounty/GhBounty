@@ -179,5 +179,16 @@ export type Submission = {
    * when unknown (mock paths).
    */
   totalForBounty?: number | null;
+  /**
+   * GHB-93: on-chain payout signature, mirrored from `submissions.tx_hash`.
+   * Set when the bounty resolved to this submission and the relayer
+   * (or the company in `assisted` mode) executed `resolve_bounty` on
+   * Solana. `null` while pending payout, `undefined` when the caller
+   * didn't fetch tx_hash (mock paths, listings that don't need it).
+   *
+   * Used by the earnings dashboard to render explorer links per
+   * payment, and to split "earned" vs "pending payout" totals.
+   */
+  payoutTxHash?: string | null;
   createdAt: number;
 };

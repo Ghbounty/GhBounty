@@ -3111,4 +3111,152 @@ section { position: relative; padding: 120px 40px; }
   .profile-hero-main { gap: 14px; }
 }
 
+/* =========================================================
+   GHB-93 — Earnings dashboard (dev profile)
+   ========================================================= */
+.earnings-card {
+  /* sits between the profile card and the submissions list */
+  gap: 22px;
+}
+.earnings-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px;
+}
+.earnings-head-aux {
+  font-size: 12px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+.earnings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+.earnings-kpi {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: rgba(0, 229, 209, 0.03);
+  border: 1px solid var(--border);
+}
+.earnings-kpi-label {
+  font-size: 11px; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: .1em;
+}
+.earnings-kpi-value {
+  font-size: 22px; font-weight: 600; color: var(--text);
+  line-height: 1.1;
+}
+.earnings-kpi-aux {
+  font-size: 12px; color: var(--text-dim);
+}
+
+.earnings-sub {
+  display: flex; flex-direction: column; gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.earnings-sub-head { display: flex; align-items: baseline; justify-content: space-between; }
+.earnings-sub-title {
+  font-size: 13px; font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase; letter-spacing: .08em;
+  margin: 0;
+}
+
+.earnings-payments {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.earnings-payment {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border);
+  transition: background .15s, border-color .15s;
+}
+.earnings-payment:hover {
+  background: rgba(0, 229, 209, 0.04);
+  border-color: var(--border-strong);
+}
+.earnings-payment-left {
+  display: flex; align-items: center; gap: 12px;
+  min-width: 0;
+}
+.earnings-payment-meta {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0;
+}
+.earnings-payment-title {
+  font-size: 14px; color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 360px;
+}
+.earnings-payment-title:hover { color: var(--accent); }
+.earnings-payment-sub {
+  font-size: 12px; color: var(--text-dim);
+}
+.earnings-payment-right {
+  display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0;
+}
+.earnings-payment-amount {
+  font-family: var(--font-mono); font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+}
+.earnings-payment-tx {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 4px 8px; border-radius: 6px;
+  border: 1px solid var(--border);
+  transition: color .15s, border-color .15s;
+}
+.earnings-payment-tx:hover {
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
+.earnings-top {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.earnings-top-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border);
+}
+.earnings-top-left {
+  display: flex; align-items: center; gap: 10px;
+  text-decoration: none; color: var(--text);
+  min-width: 0;
+}
+.earnings-top-left:hover .earnings-top-name { color: var(--accent); }
+.earnings-top-name {
+  font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: color .15s;
+}
+.earnings-top-meta {
+  font-size: 12.5px; color: var(--text-dim);
+  flex-shrink: 0;
+}
+.earnings-top-meta strong {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+@media (max-width: 700px) {
+  .earnings-grid { grid-template-columns: repeat(2, 1fr); }
+  .earnings-kpi-value { font-size: 18px; }
+  .earnings-payment-title { max-width: 200px; }
+}
+
 
