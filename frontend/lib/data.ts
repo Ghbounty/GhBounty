@@ -1045,14 +1045,19 @@ export async function fetchSubmissionDetail(
   // atomically) but we treat any missing field as "no verdict" to be
   // resilient.
   const glScore = evalRow?.genlayer_score ?? null;
-  const glStatus = evalRow?.genlayer_status ?? null;
+  // Narrow status at the declaration so the discriminated union below
+  // gets the right literal type — a Next.js build on Vercel (stricter
+  // TS than our root pnpm typecheck) refused to carry the narrow
+  // through the multi-`&&` truthy guard otherwise.
+  const glStatus: "passed" | "rejected_by_genlayer" | null =
+    evalRow?.genlayer_status === "passed" ||
+    evalRow?.genlayer_status === "rejected_by_genlayer"
+      ? evalRow.genlayer_status
+      : null;
   const glDims = evalRow?.genlayer_dimensions ?? null;
   const glTx = evalRow?.genlayer_tx_hash ?? null;
   const genlayer =
-    typeof glScore === "number" &&
-    (glStatus === "passed" || glStatus === "rejected_by_genlayer") &&
-    glDims &&
-    glTx
+    typeof glScore === "number" && glStatus !== null && glDims && glTx
       ? {
           score: glScore,
           status: glStatus,
