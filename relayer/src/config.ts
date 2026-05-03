@@ -77,6 +77,25 @@ export interface GenLayerConfig {
   pollTimeoutS: number;
 }
 
+/**
+ * GHB-70 sandbox config — Fly.io ephemeral machines for test execution.
+ *
+ * Disabled (no spawn) when `apiToken` or `appName` is null. The
+ * submission handler (later, GHB-72/73) treats that as "no test
+ * results available" and falls through to the Opus-only path.
+ *
+ * The defaults match the architecture doc: 2 CPU / 2 GB RAM / 5 min cap.
+ */
+export interface SandboxConfig {
+  apiToken: string | null;
+  appName: string | null;
+  image: string;
+  region: string;
+  timeoutS: number;
+  cpus: number;
+  memoryMb: number;
+}
+
 export interface RelayerConfig {
   rpcUrl: string;
   wsUrl: string;
@@ -89,6 +108,7 @@ export interface RelayerConfig {
   anthropicApiKey: string | null;
   anthropicModel: string;
   genlayer: GenLayerConfig;
+  sandbox: SandboxConfig;
 }
 
 const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929";
@@ -129,6 +149,20 @@ export function loadConfig(): RelayerConfig {
   // hangs without cutting off legitimate consensus rounds.
   const glPollTimeout = Number(process.env.GENLAYER_POLL_TIMEOUT_S ?? "300");
 
+  // GHB-70 sandbox config. Both apiToken and appName are required to
+  // enable spawning; either one missing → sandbox disabled, no Fly
+  // calls happen at all. Image / region / sizing have safe defaults so
+  // local devs don't have to think about them.
+  const flyToken = process.env.FLY_API_TOKEN?.trim() || null;
+  const flyApp = process.env.FLY_SANDBOX_APP?.trim() || null;
+  const flyImage =
+    process.env.FLY_SANDBOX_IMAGE?.trim() ||
+    "registry.fly.io/ghbounty-sandbox:v1";
+  const flyRegion = process.env.FLY_SANDBOX_REGION?.trim() || "iad";
+  const flyTimeout = Number(process.env.FLY_SANDBOX_TIMEOUT_S ?? "300");
+  const flyCpus = Number(process.env.FLY_SANDBOX_CPUS ?? "2");
+  const flyMemMb = Number(process.env.FLY_SANDBOX_MEMORY_MB ?? "2048");
+
   return {
     rpcUrl,
     wsUrl,
@@ -147,6 +181,17 @@ export function loadConfig(): RelayerConfig {
       pollTimeoutS: Number.isFinite(glPollTimeout) && glPollTimeout > 0
         ? glPollTimeout
         : 300,
+    },
+    sandbox: {
+      apiToken: flyToken,
+      appName: flyApp,
+      image: flyImage,
+      region: flyRegion,
+      timeoutS:
+        Number.isFinite(flyTimeout) && flyTimeout > 0 ? flyTimeout : 300,
+      cpus: Number.isFinite(flyCpus) && flyCpus > 0 ? flyCpus : 2,
+      memoryMb:
+        Number.isFinite(flyMemMb) && flyMemMb >= 256 ? flyMemMb : 2048,
     },
   };
 }
