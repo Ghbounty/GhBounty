@@ -2167,6 +2167,164 @@ section { position: relative; padding: 120px 40px; }
 }
 .profile-submissions { display: flex; flex-direction: column; }
 
+/* GHB-90: header row holds the section title + the filter pills row.
+ * Stacks vertically on narrow screens via flex-wrap. */
+.profile-submissions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.filter-pill-count {
+  opacity: 0.6;
+  margin-left: 4px;
+  font-size: 0.85em;
+}
+
+/* Whole-card link target — turn off the default anchor underline +
+ * inherit colour, and add a hover lift to signal interactivity. */
+.bounty-card-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.bounty-card-link:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+/* Granular status badges (GHB-90). Same shape as `.submission-*`
+ * badges below; new colours for the new states. */
+.status-badge.granular-submitted   { color: #FEBC2E; border-color: rgba(254, 188, 46, 0.3); background: rgba(254, 188, 46, 0.06); }
+.status-badge.granular-evaluating  { color: var(--accent); border-color: var(--border-strong); background: rgba(0, 229, 209, 0.04); }
+.status-badge.granular-scored      { color: var(--accent); border-color: var(--border-strong); background: rgba(0, 229, 209, 0.08); }
+.status-badge.granular-auto-rejected { color: #999; border-color: var(--border); background: rgba(255, 255, 255, 0.02); }
+.status-badge.granular-rejected    { color: #FF6B6B; border-color: rgba(255, 107, 107, 0.3); background: rgba(255, 107, 107, 0.05); }
+.status-badge.granular-approved    { color: #4ADE80; border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.08); }
+.status-badge.granular-lost        { color: var(--text-dim); border-color: var(--border); background: rgba(255, 255, 255, 0.02); }
+
+/* Score + rank pills shown in the row footer. Compact, mono font so
+ * "8/10" and "#2 of 5" line up cleanly next to the SOL amount. */
+.submission-rank,
+.profile-submissions .submission-score {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.submission-rank-of {
+  opacity: 0.6;
+  margin-left: 2px;
+}
+
+/* Auto-reject feedback variant — reuses the reject feedback card
+ * shape but with a neutral gray accent (vs the red of manual reject). */
+.submission-auto-reject {
+  border-color: var(--border) !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+}
+.submission-auto-reject .submission-reject-feedback-label {
+  color: var(--text-dim) !important;
+}
+
+/* GHB-91: detail page — two-column body with the PR meta on the left
+ * and the eval report on the right. Stacks on narrow screens. */
+.submission-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 16px 0;
+}
+@media (max-width: 900px) {
+  .submission-detail-grid { grid-template-columns: 1fr; }
+}
+
+.report-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.report-panel-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.report-dims {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.report-dim {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.report-dim-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.report-dim-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  flex: 1;
+}
+.report-dim-weight {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+.report-dim-score {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+.report-dim-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+.report-dim-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #5fb6ff);
+  transition: width 240ms ease;
+}
+.report-dim-reasoning {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0;
+  line-height: 1.4;
+}
+.report-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.report-summary p {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
 /* =========================================================
    APP — MOBILE / RESPONSIVE
    ========================================================= */
