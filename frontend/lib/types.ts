@@ -90,6 +90,37 @@ export type Bounty = {
  */
 export type SubmissionStatus = "pending" | "accepted" | "rejected" | "lost";
 
+/**
+ * GHB-90: finer-grained lifecycle the dev sees on `/app/profile` and
+ * `/app/submissions/[id]`. The coarse `SubmissionStatus` is what the
+ * company-side dashboards filter on; this expands `pending` into the
+ * three real waiting states the dev cares about, and splits `rejected`
+ * by who rejected it.
+ *
+ *   submitted     — row exists, no `evaluations` row yet (relayer
+ *                   hasn't touched it)
+ *   evaluating    — eval row exists but score still null (Opus mid-flight)
+ *   scored        — eval row + score, no `submission_reviews` row yet
+ *                   (waiting for the company to triage)
+ *   auto_rejected — `submission_reviews.auto_rejected = true` (GHB-85
+ *                   gate: score < bounty.reject_threshold)
+ *   rejected      — `submission_reviews.rejected = true` AND
+ *                   `auto_rejected = false` (the company manually said
+ *                   no — feedback in `reject_reason`)
+ *   approved      — on-chain `submissions.state = 'winner'` OR off-chain
+ *                   `submission_reviews.approved = true`
+ *   lost          — bounty awarded to a different submission (mirrors
+ *                   the coarse `lost` status)
+ */
+export type SubmissionGranularStatus =
+  | "submitted"
+  | "evaluating"
+  | "scored"
+  | "auto_rejected"
+  | "rejected"
+  | "approved"
+  | "lost";
+
 export type Submission = {
   id: string;
   bountyId: string;
@@ -122,5 +153,31 @@ export type Submission = {
    * undefined upstream.
    */
   approvalFeedback?: string;
+  /**
+   * GHB-90: refined status for the dev profile + submission detail page.
+   * Always populated when reading from Supabase; mock paths may leave
+   * this undefined — callers fall back to the coarse `status`.
+   */
+  granularStatus?: SubmissionGranularStatus;
+  /**
+   * Most-recent evaluation score (1-10) from the `evaluations` table.
+   * `null` while the relayer pipeline hasn't scored yet, `undefined`
+   * when the caller didn't fetch evaluations (mock paths).
+   */
+  score?: number | null;
+  /** Source label of the score — "opus", "stub", "genlayer". */
+  scoreSource?: string | null;
+  /**
+   * Rank within the bounty (1-indexed, lower is better). Mirrors
+   * `submissions.rank`, written by the relayer alongside the score.
+   * `null` until scored or for auto-rejected rows.
+   */
+  rank?: number | null;
+  /**
+   * Total submissions on the same bounty at fetch time. Used together
+   * with `rank` to render "#2 of 5" in the row + detail page. `null`
+   * when unknown (mock paths).
+   */
+  totalForBounty?: number | null;
   createdAt: number;
 };

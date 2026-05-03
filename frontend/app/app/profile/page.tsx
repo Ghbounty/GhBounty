@@ -14,7 +14,13 @@ import {
   fetchCompanies,
   fetchSubmissionsByDev,
 } from "@/lib/data";
-import type { Bounty, Company, Dev, Submission, SubmissionStatus } from "@/lib/types";
+import type {
+  Bounty,
+  Company,
+  Dev,
+  Submission,
+  SubmissionGranularStatus,
+} from "@/lib/types";
 
 export default function ProfilePage() {
   return (
@@ -387,35 +393,158 @@ function DevProfile() {
         </div>
       </div>
 
-      <section className="profile-submissions">
-        <h2 className="section-label">My submissions</h2>
-        {submissions.length === 0 ? (
-          <div className="empty">
-            <p>You haven&apos;t submitted any PRs yet.</p>
-            <Link href="/app/dev" className="btn btn-ghost btn-sm">
-              Browse bounties →
-            </Link>
-          </div>
-        ) : (
-          <div className="bounty-stack">
-            {submissions.map((s) => (
-              <SubmissionRow
-                key={s.id}
-                submission={s}
-                bounty={bountiesById.get(s.bountyId)}
-                company={
-                  bountiesById.get(s.bountyId)?.companyId
-                    ? companiesById.get(bountiesById.get(s.bountyId)!.companyId)
-                    : undefined
-                }
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      <DevSubmissionsList
+        submissions={submissions}
+        bountiesById={bountiesById}
+        companiesById={companiesById}
+      />
     </div>
   );
 }
+
+/**
+ * GHB-90: list of the dev's submissions with status filters and the
+ * granular badge per row. Lifted out of `DevProfile` so the filter
+ * state stays scoped (no need to re-render the whole profile when the
+ * dev clicks a pill) and so the section reads top-down.
+ *
+ * Filter buckets are intentionally COARSER than the granular status:
+ * "Pending review" collapses submitted/evaluating/scored into one — the
+ * dev is waiting on the same human/relayer decision regardless of
+ * sub-state. The granular badge inside each row keeps the detail.
+ */
+type ProfileFilter = "all" | "pending" | "won" | "rejected";
+const PROFILE_FILTERS: ProfileFilter[] = ["all", "pending", "won", "rejected"];
+const PROFILE_FILTER_LABELS: Record<ProfileFilter, string> = {
+  all: "All",
+  pending: "In review",
+  won: "Won",
+  rejected: "Rejected",
+};
+
+function matchesProfileFilter(s: Submission, f: ProfileFilter): boolean {
+  if (f === "all") return true;
+  // Fall back to coarse `status` when granularStatus isn't populated
+  // (mock paths). Maps loosely to the same buckets.
+  const g = s.granularStatus ?? coarseToGranular(s);
+  switch (f) {
+    case "pending":
+      return g === "submitted" || g === "evaluating" || g === "scored";
+    case "won":
+      return g === "approved";
+    case "rejected":
+      return g === "auto_rejected" || g === "rejected" || g === "lost";
+  }
+}
+
+function coarseToGranular(s: Submission): SubmissionGranularStatus {
+  if (s.status === "accepted") return "approved";
+  if (s.status === "lost") return "lost";
+  if (s.status === "rejected") return s.autoRejected ? "auto_rejected" : "rejected";
+  return "submitted";
+}
+
+function DevSubmissionsList({
+  submissions,
+  bountiesById,
+  companiesById,
+}: {
+  submissions: Submission[];
+  bountiesById: Map<string, Bounty>;
+  companiesById: Map<string, Company>;
+}) {
+  const [filter, setFilter] = useState<ProfileFilter>("all");
+
+  // Pre-compute counts for each filter chip. Cheap (one pass per
+  // re-render of this component, submissions list is tens of items
+  // tops).
+  const counts = useMemo(() => {
+    const out: Record<ProfileFilter, number> = {
+      all: submissions.length,
+      pending: 0,
+      won: 0,
+      rejected: 0,
+    };
+    for (const s of submissions) {
+      const g = s.granularStatus ?? coarseToGranular(s);
+      if (g === "submitted" || g === "evaluating" || g === "scored") out.pending++;
+      else if (g === "approved") out.won++;
+      else if (g === "auto_rejected" || g === "rejected" || g === "lost") out.rejected++;
+    }
+    return out;
+  }, [submissions]);
+
+  const filtered = submissions.filter((s) => matchesProfileFilter(s, filter));
+
+  return (
+    <section className="profile-submissions">
+      <div className="profile-submissions-head">
+        <h2 className="section-label">My submissions</h2>
+        {submissions.length > 0 && (
+          <div className="filter-pills">
+            {PROFILE_FILTERS.map((f) => (
+              <button
+                key={f}
+                className={`filter-pill ${filter === f ? "active" : ""}`}
+                onClick={() => setFilter(f)}
+                type="button"
+              >
+                {PROFILE_FILTER_LABELS[f]}{" "}
+                <span className="filter-pill-count">({counts[f]})</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {submissions.length === 0 ? (
+        <div className="empty">
+          <p>You haven&apos;t submitted any PRs yet.</p>
+          <Link href="/app/dev" className="btn btn-ghost btn-sm">
+            Browse bounties →
+          </Link>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="empty">
+          <p>No submissions match this filter.</p>
+        </div>
+      ) : (
+        <div className="bounty-stack">
+          {filtered.map((s) => (
+            <SubmissionRow
+              key={s.id}
+              submission={s}
+              bounty={bountiesById.get(s.bountyId)}
+              company={
+                bountiesById.get(s.bountyId)?.companyId
+                  ? companiesById.get(bountiesById.get(s.bountyId)!.companyId)
+                  : undefined
+              }
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * GHB-90: dev-facing summary of a single submission.
+ *
+ * The whole row links to `/app/submissions/[id]` (GHB-91) — clicking
+ * anywhere except the inner PR/company anchors opens the detail page.
+ * We render the granular status badge, the score (when scored), the
+ * rank within the bounty, and the kind-specific feedback panel
+ * (auto-reject reason, manual reject feedback, win note, lost note).
+ */
+const GRANULAR_LABELS: Record<SubmissionGranularStatus, string> = {
+  submitted: "Submitted",
+  evaluating: "Evaluating",
+  scored: "Scored",
+  auto_rejected: "Auto-rejected",
+  rejected: "Rejected",
+  approved: "Won",
+  lost: "Not selected",
+};
 
 function SubmissionRow({
   submission,
@@ -426,56 +555,83 @@ function SubmissionRow({
   bounty?: Bounty;
   company?: Company;
 }) {
-  const statusLabels: Record<SubmissionStatus, string> = {
-    pending: "Pending",
-    accepted: "Accepted",
-    rejected: "Rejected",
-    lost: "Not selected",
-  };
+  const granular = submission.granularStatus ?? coarseToGranular(submission);
+  const label = GRANULAR_LABELS[granular];
+  const score = submission.score;
+  const rank = submission.rank;
+  const total = submission.totalForBounty;
+
   return (
-    <div className="bounty-card">
+    <Link
+      href={`/app/submissions/${submission.id}`}
+      className={`bounty-card bounty-card-link granular-${granular.replace("_", "-")}`}
+    >
       <div className="bounty-card-head">
         {company && (
-          <Link
-            href={`/app/companies/${encodeURIComponent(company.id)}`}
+          // Inner Link to the company page — wrapped in a span so the
+          // outer `<a>` still receives the click everywhere else. We
+          // can't nest <a> tags, so use a span + onClick navigation.
+          <span
             className="bounty-company"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              window.location.href = `/app/companies/${encodeURIComponent(company.id)}`;
+            }}
           >
             <Avatar src={company.avatarUrl} name={company.name} size={24} rounded={false} />
             <span className="bounty-company-name">{company.name}</span>
-          </Link>
+          </span>
         )}
-        <span className={`status-badge submission-${submission.status}`}>
-          ● {statusLabels[submission.status]}
+        <span className={`status-badge granular-${granular.replace("_", "-")}`}>
+          ● {label}
         </span>
       </div>
-      <a
-        href={submission.prUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="bounty-card-title"
-      >
+      <div className="bounty-card-title">
         <span className="bounty-repo">
           {submission.prRepo}{" "}
           <span className="bounty-hash">PR #{submission.prNumber}</span>
         </span>
         {bounty?.title && <span className="bounty-issue-title">{bounty.title}</span>}
-      </a>
+      </div>
       <div className="bounty-card-foot">
         {bounty && (
           <div className="bounty-amount">
             <span className="bounty-amount-val">
               {bounty.amountUsdc.toLocaleString()}
             </span>
-            <span className="musdc-pill">
-              SOL
-            </span>
+            <span className="musdc-pill">SOL</span>
           </div>
+        )}
+        {typeof score === "number" && (
+          <span className="submission-score" title="Opus evaluation score">
+            {score}/10
+          </span>
+        )}
+        {typeof rank === "number" && (
+          <span className="submission-rank" title="Rank within this bounty">
+            #{rank}
+            {typeof total === "number" && total > 0 && (
+              <span className="submission-rank-of"> of {total}</span>
+            )}
+          </span>
         )}
         {submission.note && (
           <span className="submission-note">“{submission.note}”</span>
         )}
       </div>
-      {submission.status === "rejected" && (
+      {granular === "auto_rejected" && (
+        <div className="submission-reject-feedback submission-auto-reject">
+          <span className="submission-reject-feedback-label">
+            Auto-rejected by the relayer
+          </span>
+          <p>
+            {submission.rejectReason ??
+              "Score below the bounty's threshold."}
+          </p>
+        </div>
+      )}
+      {granular === "rejected" && (
         <div className="submission-reject-feedback">
           <span className="submission-reject-feedback-label">
             Feedback from the company
@@ -486,7 +642,7 @@ function SubmissionRow({
           </p>
         </div>
       )}
-      {submission.status === "accepted" && (
+      {granular === "approved" && (
         <div className="submission-approve-feedback">
           <span className="submission-approve-feedback-label">
             ★ You won this bounty
@@ -498,7 +654,7 @@ function SubmissionRow({
           </p>
         </div>
       )}
-      {submission.status === "lost" && (
+      {granular === "lost" && (
         <div className="submission-lost-feedback">
           <span className="submission-lost-feedback-label">
             Another submission won this bounty
@@ -509,7 +665,7 @@ function SubmissionRow({
           </p>
         </div>
       )}
-    </div>
+    </Link>
   );
 }
 
