@@ -312,9 +312,9 @@ function Solution() {
   }[] = [
     {
       I: IconBrain,
-      t: "AI Evaluation",
-      tag: "LLM-powered",
-      d: "Multi-LLM agents analyze pull requests and contribution quality with deep code understanding.",
+      t: "Two-stage AI review",
+      tag: "Sonnet + GenLayer",
+      d: "Claude Opus pre-screens with a 4-dimension report (code, tests, requirements, security). GenLayer's 5-validator network then casts a democratic second opinion — never just one model deciding.",
     },
     {
       I: IconLock,
@@ -420,16 +420,16 @@ function HowItWorks() {
 
   const companies = [
     {
-      t: "Post an issue with a bounty",
-      d: "Define scope, acceptance criteria, and reward for any GitHub issue.",
+      t: "Post an issue — or scan a whole repo",
+      d: "Pin a single GitHub issue with scope and reward, or paste a public repo URL and let AI propose bounties + suggested USDC amounts for every open issue at once.",
     },
     {
       t: "Deposit funds into escrow",
-      d: "Lock USDC into a smart contract. Funds are safe until contribution is verified.",
+      d: "Lock USDC into a smart contract. Funds are safe until a contribution is verified.",
     },
     {
-      t: "Define evaluation criteria",
-      d: "Set quality thresholds, test coverage requirements, and code standards.",
+      t: "Pick auto-release or AI-assisted review",
+      d: "Set quality thresholds and acceptance criteria. Then choose: AI auto-releases to the winning PR, or you pick manually from a ranked shortlist.",
     },
     {
       t: "Watch AI do the rest",
@@ -778,6 +778,42 @@ function FAQ() {
   );
 }
 
+/* ---------------- Community ---------------- */
+function Community() {
+  return (
+    <section id="community">
+      <div className="container">
+        <div className="community-card">
+          <div className="community-meta">
+            <div className="eyebrow">Community</div>
+            <h3>Build alongside the team.</h3>
+            <p>
+              Our Telegram is where Arturo and Tomi share the roadmap, take
+              feedback, and ship in public. It&apos;s small and quiet — drop in
+              and say hi.
+            </p>
+          </div>
+          <a
+            className="btn btn-primary"
+            href="https://t.me/+MuhPT-KWGR4yY2Fk"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <TelegramIcon />
+            Join the Telegram
+          </a>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+const TelegramIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" {...p}>
+    <path d="M12 0a12 12 0 100 24 12 12 0 000-24zm5.56 8.16-1.86 8.78c-.14.62-.51.77-1.03.48l-2.85-2.1-1.37 1.32c-.15.15-.28.28-.57.28l.2-2.9 5.27-4.77c.23-.2-.05-.32-.36-.12l-6.51 4.1-2.81-.88c-.61-.19-.62-.61.13-.9l10.99-4.24c.51-.18.96.12.79.94z" />
+  </svg>
+);
+
 /* ---------------- Final CTA ---------------- */
 function FinalCTA() {
   return (
@@ -825,6 +861,14 @@ function Footer() {
         >
           <XIcon />
         </a>
+        <a
+          href="https://t.me/+MuhPT-KWGR4yY2Fk"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Telegram"
+        >
+          <TelegramIcon />
+        </a>
       </div>
       <div className="footer-right">© 2026 GH BOUNTY · ALL RIGHTS RESERVED</div>
     </footer>
@@ -846,6 +890,7 @@ export default function Home() {
       <LiveBounties />
       <PoweredBy />
       <Team />
+      <Community />
       <FAQ />
       <FinalCTA />
       <Footer />

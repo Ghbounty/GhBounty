@@ -3598,3 +3598,70 @@ section { position: relative; padding: 120px 40px; }
   .founder-photo { width: 72px; height: 72px; }
   .how-tab { padding: 9px 14px; font-size: 12.5px; }
 }
+
+/* ---------------- Community ---------------- */
+#community {
+  padding-top: 40px;
+  padding-bottom: 40px;
+}
+.community-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 32px 36px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(0, 229, 209, 0.08), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+  position: relative;
+  overflow: hidden;
+}
+.community-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    600px circle at 100% 50%,
+    rgba(0, 229, 209, 0.06),
+    transparent 60%
+  );
+  pointer-events: none;
+}
+.community-meta {
+  max-width: 560px;
+  position: relative;
+}
+.community-meta .eyebrow {
+  margin-bottom: 8px;
+}
+.community-meta h3 {
+  font-size: 22px;
+  line-height: 1.25;
+  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+}
+.community-meta p {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.community-card .btn {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .community-card {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 24px;
+    gap: 20px;
+  }
+  .community-meta h3 { font-size: 19px; }
+}
