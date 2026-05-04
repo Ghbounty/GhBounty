@@ -21,17 +21,21 @@
  *
  * Trust model:
  *   - The Fly machine is treated as hostile. We pipe a SANDBOX_SPEC
- *     JSON in and read a single `__SANDBOX_RESULT__:<json>` line back
- *     from the logs. No persistent state, no shared volumes.
+ *     JSON in and read a single `__SANDBOX_RESULT_<nonce>__:<json>`
+ *     line back from the logs. No persistent state, no shared volumes.
  *   - `gitToken` (when set) is the relayer's own GitHub PAT. It rides
  *     in the SANDBOX_SPEC env, gets used by git via
  *     http.extraHeader, and dies with the machine.
+ *   - GHB-74: a per-run cryptographic nonce is mixed into the result
+ *     marker prefix so a malicious PR cannot spoof a "tests passed"
+ *     line in its own stdout. See THREAT_MODEL.md "T-3".
  *
  * The destroy step always runs in a `finally` even when spawn or wait
  * threw — leaked machines cost real money on Fly.
  */
 
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 
 import {
   destroySandbox,
@@ -48,7 +52,20 @@ import type {
   SandboxSpec,
 } from "./types.js";
 
-const RESULT_PREFIX = "__SANDBOX_RESULT__:";
+/**
+ * Result-marker prefix builder. The nonce is mixed into the prefix
+ * itself (not after a separator) so a single `indexOf` match is
+ * enough to authenticate the line — we never strip-then-validate, we
+ * scan for the exact nonced prefix and the PR can't print it without
+ * somehow knowing the nonce we generated post-spawn.
+ *
+ * GHB-74: anti-spoofing. Pre-GHB-74 the prefix was a fixed string,
+ * which let a malicious PR print a fake "tests passed" line.
+ */
+function buildResultPrefix(nonce: string): string {
+  return `__SANDBOX_RESULT_${nonce}__:`;
+}
+
 const FLYCTL_LOGS_TIMEOUT_MS = 15_000;
 
 /**
@@ -97,16 +114,33 @@ export async function runSandboxedTests(
       ? opts.testTimeoutS
       : Math.max(60, cfg.timeoutS - 30);
 
+  // GHB-74: per-run nonce mixed into the result-marker prefix. 16 bytes
+  // of entropy → 32 hex chars; orders of magnitude more than enough to
+  // make blind guessing infeasible inside the 5-min cap.
+  const resultNonce = randomBytes(16).toString("hex");
+  const resultPrefix = buildResultPrefix(resultNonce);
+
+  // GHB-74: customCommand validator. Strict allowlist of safe shell
+  // characters. Today the submission handler always passes null, but
+  // when bounty-creator UIs eventually expose this we want a hard
+  // assertion that the value can't contain shell injection on the
+  // way IN to the sandbox (RCE inside the sandbox is not the concern
+  // — the sandbox already runs untrusted code; the concern is a
+  // future bug that exposes this path to PR-supplied data, which
+  // would let the PR control what the runner executes).
+  const customCommand = validateCustomCommand(opts.customCommand);
+
   const spec: SandboxSpec = {
     repoUrl: opts.repoUrl,
     baseRef: opts.baseRef,
     prNumber: opts.prNumber,
-    customCommand: opts.customCommand?.trim() || null,
+    customCommand,
     testTimeoutS: innerTimeoutS,
     // Forwarded straight from relayer config in the submission handler
     // — the executor does not look at process.env directly so it stays
     // cleanly testable.
     gitToken: null,
+    resultNonce,
   };
 
   const startedAtMs = Date.now();
@@ -152,6 +186,7 @@ export async function runSandboxedTests(
         cfg as SandboxConfig & { apiToken: string; appName: string },
         handle.machineId,
         fetchLogs,
+        resultPrefix,
       );
       if (parsed) {
         result = parsed;
@@ -178,9 +213,10 @@ export async function runSandboxedTests(
 
 /**
  * Pull the most recent log lines from Fly for the machine, scan
- * backwards for the `__SANDBOX_RESULT__:` prefix, and parse the JSON
- * into an `ExecutorResult`. Returns null if no result line was found
- * or the JSON didn't validate.
+ * backwards for the per-run nonced prefix
+ * (`__SANDBOX_RESULT_<nonce>__:`), and parse the JSON into an
+ * `ExecutorResult`. Returns null if no result line was found or the
+ * JSON didn't validate.
  *
  * We poll a couple of times because Fly's log indexer takes ~1-3 s
  * to make recently-emitted lines queryable.
@@ -189,10 +225,11 @@ async function fetchAndParseResult(
   cfg: SandboxConfig & { apiToken: string; appName: string },
   machineId: string,
   fetchLogs: LogFetcher,
+  resultPrefix: string,
 ): Promise<ExecutorResult | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const lines = await fetchLogs(cfg, machineId);
-    const parsed = parseResultFromLogs(lines);
+    const parsed = parseResultFromLogs(lines, resultPrefix);
     if (parsed) return parsed;
     await sleep(1500);
   }
@@ -268,17 +305,25 @@ async function defaultFetchLogsViaFlyctl(
 }
 
 /**
- * Walk lines bottom-up looking for the result prefix. We allow either
- * the last marker line (most recent run) OR an earlier marker (e.g.
- * if a test runner kept logging after the runner emitted its line —
- * shouldn't happen given how we order, but defensive).
+ * Walk lines bottom-up looking for the nonced result prefix. Only
+ * lines bearing the per-run prefix (built by `buildResultPrefix`)
+ * are trusted — a malicious PR can print whatever it likes to
+ * stdout but cannot guess our 16-byte nonce, so its forged lines
+ * never match.
+ *
+ * `resultPrefix` is exported via the `runSandboxedTests` execution
+ * path. For tests / out-of-band callers, pass the full prefix string
+ * including the nonce.
  */
-export function parseResultFromLogs(lines: string[]): ExecutorResult | null {
+export function parseResultFromLogs(
+  lines: string[],
+  resultPrefix: string,
+): ExecutorResult | null {
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i] ?? "";
-    const idx = line.indexOf(RESULT_PREFIX);
+    const idx = line.indexOf(resultPrefix);
     if (idx === -1) continue;
-    const payload = line.slice(idx + RESULT_PREFIX.length).trim();
+    const payload = line.slice(idx + resultPrefix.length).trim();
     try {
       const obj = JSON.parse(payload) as Record<string, unknown>;
       return adaptRunnerJsonToResult(obj);
@@ -378,6 +423,46 @@ function numberOrNull(v: unknown): number | null {
 
 function stringOr(v: unknown, fallback: string): string {
   return typeof v === "string" ? v : fallback;
+}
+
+/**
+ * GHB-74: defensive validator for `customCommand`. Today the
+ * submission handler always passes null, so this is mostly a guard
+ * against future regressions: if/when bounty-creator UIs let an
+ * operator override the runner command, we want to make sure that
+ *   (a) untrusted input can never reach this code path, and
+ *   (b) values that DO arrive here are bounded in length and free
+ *       of control bytes that could mess with the runner's stdio
+ *       framing or `__SANDBOX_RESULT_*__` line detection.
+ *
+ * NOTE: This is NOT a shell-injection defence. The runner's
+ * intentional contract is `sh -c <customCommand>`, so any caller
+ * passing PR-controlled data into `customCommand` is broken by
+ * design — see THREAT_MODEL.md "T-7". This validator just catches
+ * the most obvious accidental misuse and bounds the impact when it
+ * happens.
+ */
+const CUSTOM_COMMAND_MAX_LEN = 4096;
+
+export function validateCustomCommand(
+  raw: string | null | undefined,
+): string | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > CUSTOM_COMMAND_MAX_LEN) {
+    throw new Error(
+      `customCommand too long (${trimmed.length} > ${CUSTOM_COMMAND_MAX_LEN})`,
+    );
+  }
+  // Reject NULs and ASCII control chars except tab/CR/LF — they have
+  // no business in a shell command and historically cause runners
+  // grief (NUL truncates argv, raw \r tricks line parsers, etc.).
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(trimmed)) {
+    throw new Error("customCommand contains forbidden control characters");
+  }
+  return trimmed;
 }
 
 function sleep(ms: number): Promise<void> {

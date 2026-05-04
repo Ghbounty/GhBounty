@@ -15,9 +15,11 @@
  * cheaper trade-off (~80 LOC duplicated, 0 build infrastructure).
  *
  * Output contract — the LAST line of stdout MUST be:
- *   __SANDBOX_RESULT__:<single-line JSON>
- * The relayer's executor scans logs for that prefix. Earlier stdout
- * lines are runner noise that we tail-truncate.
+ *   __SANDBOX_RESULT_<nonce>__:<single-line JSON>
+ * The <nonce> is the `resultNonce` field of SANDBOX_SPEC; the relayer
+ * generates a fresh 16-byte hex string per run and only trusts log
+ * lines bearing that exact prefix (GHB-74 anti-spoofing). Earlier
+ * stdout lines are runner noise that we tail-truncate.
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -25,17 +27,30 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 const WORK = "/work/repo";
-const RESULT_PREFIX = "__SANDBOX_RESULT__:";
 const TAIL_BYTES = 4096;
 const SIGKILL_GRACE_MS = 5000;
 
 // ── result emission ───────────────────────────────────────────────────
+//
+// GHB-74: result-marker prefix is built from a per-run nonce that the
+// relayer-side `executor.ts` generated. The PR's test runner sees an
+// empty SANDBOX_SPEC env (we scrub it before exec — see runChild
+// below) and would have to guess 16 random bytes to spoof a line the
+// relayer trusts. We default to `boot` for the early infra-failure
+// path that runs before SANDBOX_SPEC has been parsed; the relayer
+// tolerates an unverified prefix in that narrow case (no PR code has
+// run yet so spoofing is not a concern).
+let resultPrefix = "__SANDBOX_RESULT_boot__:";
+
+function setResultPrefixFromNonce(nonce) {
+  resultPrefix = `__SANDBOX_RESULT_${nonce}__:`;
+}
 
 function emit(result) {
   // Final line of stdout. We always emit something so the relayer
   // never has to deal with a "no result" case — even infra failures
   // produce a parseable JSON line.
-  process.stdout.write(`\n${RESULT_PREFIX}${JSON.stringify(result)}\n`);
+  process.stdout.write(`\n${resultPrefix}${JSON.stringify(result)}\n`);
 }
 
 function tail(buf) {
@@ -58,6 +73,18 @@ try {
 }
 if (!spec.repoUrl) exitWith({ status: "infra", reason: "spec.repoUrl required" }, 1);
 if (!spec.baseRef) exitWith({ status: "infra", reason: "spec.baseRef required" }, 1);
+if (!spec.resultNonce || typeof spec.resultNonce !== "string") {
+  exitWith({ status: "infra", reason: "spec.resultNonce required" }, 1);
+}
+// Reject anything other than ASCII hex so the prefix stays safe for
+// log scanning + a stray quote/control byte can't break the line.
+if (!/^[a-f0-9]{8,128}$/i.test(spec.resultNonce)) {
+  exitWith(
+    { status: "infra", reason: "spec.resultNonce must be 8-128 hex chars" },
+    1,
+  );
+}
+setResultPrefixFromNonce(spec.resultNonce);
 
 const repoUrl = String(spec.repoUrl);
 const baseRef = String(spec.baseRef);
@@ -256,6 +283,21 @@ function bufferStdio(chunk, into) {
   return combined;
 }
 
+// GHB-74: scrub SANDBOX_SPEC + any other relayer-controlled env from
+// the env passed to install/test child processes. Belt-and-suspenders
+// vs. the result-nonce defense — a malicious test runner can't read
+// `process.env.SANDBOX_SPEC` to extract the nonce + spoof a passing
+// result line, and never sees gitToken / repoUrl from the spec
+// either. Anything we want the child to see (CI, FORCE_COLOR) is
+// added back explicitly.
+function buildChildEnv() {
+  const env = { ...process.env };
+  delete env.SANDBOX_SPEC;
+  env.CI = "true";
+  env.FORCE_COLOR = "0";
+  return env;
+}
+
 function runChild(argv, label, deadlineMs) {
   return new Promise((resolve) => {
     const remaining = deadlineMs - Date.now();
@@ -267,9 +309,7 @@ function runChild(argv, label, deadlineMs) {
     const child = spawn(argv[0], argv.slice(1), {
       cwd: WORK,
       stdio: ["ignore", "pipe", "pipe"],
-      // CI=true flips many runners into non-interactive mode (no
-      // colors, no progress spinners that bloat logs).
-      env: { ...process.env, CI: "true", FORCE_COLOR: "0" },
+      env: buildChildEnv(),
     });
 
     let killed = false;

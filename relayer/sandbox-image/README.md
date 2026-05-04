@@ -10,6 +10,7 @@ machine boots from this image, runs the tests, and Fly destroys it.
 |-----|------|
 | `v1` | Toolchains only (Node, Python, Rust, Foundry, Solana, Anchor). Smoke-test entrypoint. |
 | `v2` | GHB-72 runner.mjs: clones PR, detects test runner, installs deps, runs tests, emits JSON result via `__SANDBOX_RESULT__:` line. |
+| `v3` | GHB-74 hardening: boot-time iptables egress allowlist (`firewall.sh`), per-run nonce in result-marker prefix (`__SANDBOX_RESULT_<nonce>__:`), `SANDBOX_SPEC` scrubbed from env passed to install/test child processes. |
 
 ## What's inside
 
@@ -46,11 +47,11 @@ flyctl auth docker
 # Bump the tag whenever the Dockerfile, runner.mjs, or entrypoint.sh
 # changes so the relayer can pin a known-good version via FLY_SANDBOX_IMAGE.
 docker build --platform linux/amd64 \
-  -t registry.fly.io/ghbounty-sandbox:v2 .
+  -t registry.fly.io/ghbounty-sandbox:v3 .
 
 # Push to Fly's registry. First push is slow (~1.5 GB for v2),
 # subsequent pushes only upload the changed layers.
-docker push registry.fly.io/ghbounty-sandbox:v2
+docker push registry.fly.io/ghbounty-sandbox:v3
 ```
 
 Bump the tag (`v1` → `v2`) every time the Dockerfile changes so the
@@ -68,34 +69,45 @@ flyctl machine run \
   --app ghbounty-sandbox \
   --region iad \
   --rm \
-  registry.fly.io/ghbounty-sandbox:v2
+  registry.fly.io/ghbounty-sandbox:v3
 ```
 
 If you see `node:`, `python:`, `rustc:`, `forge:`, `solana:`,
 `anchor:` lines and exit code `0`, the image is healthy.
 
-## E2E test (v2 runner against a real PR)
+## E2E test (v3 runner against a real PR)
 
 ```bash
 # A small public Anchor repo PR is the cheapest end-to-end check.
-# Replace the spec values with whatever you want to test.
-SPEC='{"repoUrl":"https://github.com/coral-xyz/anchor.git","baseRef":"master","prNumber":3500,"testTimeoutS":180}'
+# Replace the spec values with whatever you want to test. The
+# `resultNonce` is required as of v3 — pick any 16-32 hex chars
+# for a manual test; the relayer generates one per run.
+SPEC='{"repoUrl":"https://github.com/coral-xyz/anchor.git","baseRef":"master","prNumber":3500,"testTimeoutS":180,"resultNonce":"deadbeefdeadbeefdeadbeefdeadbeef"}'
 
 flyctl machine run \
   --app ghbounty-sandbox \
   --region iad \
   --rm \
   --env "SANDBOX_SPEC=$SPEC" \
-  registry.fly.io/ghbounty-sandbox:v2
+  registry.fly.io/ghbounty-sandbox:v3
 
 # Then read the logs to see what the runner reported:
-flyctl logs --app ghbounty-sandbox --no-tail | tail -50 | grep __SANDBOX_RESULT__
+flyctl logs --app ghbounty-sandbox --no-tail | tail -50 | grep __SANDBOX_RESULT_
 ```
 
 You should see a line like:
 ```
-__SANDBOX_RESULT__:{"status":"exited","runner":{"kind":"anchor",...},"exitCode":0,...}
+__SANDBOX_RESULT_deadbeefdeadbeefdeadbeefdeadbeef__:{"status":"exited","runner":{"kind":"anchor",...},"exitCode":0,...}
 ```
+
+The `firewall: egress restricted to N unique IPs` line near the top
+of the logs confirms GHB-74's egress allowlist booted cleanly.
+
+## Hardening
+
+See `THREAT_MODEL.md` in this directory for the sandbox's full
+security model — trust boundaries, vector → mitigation table, and
+the residual risks we've explicitly accepted for the MVP.
 
 ## Local run (no Fly)
 

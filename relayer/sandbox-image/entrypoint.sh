@@ -31,6 +31,17 @@ if [[ -z "${SANDBOX_SPEC:-}" ]]; then
   exit 0
 fi
 
+# GHB-74: lock down egress BEFORE any test code runs. Any failure
+# inside the firewall script aborts boot — refusing service is
+# safer than silently allowing full egress and having ops believe
+# the sandbox is hardened. The firewall script is idempotent, so
+# re-runs of the entrypoint (shouldn't happen with auto_destroy
+# but defensive) leave the rules consistent.
+if ! /usr/local/bin/sandbox-firewall; then
+  echo "sandbox: firewall setup failed — refusing to run runner" >&2
+  exit 1
+fi
+
 # Real pipeline: hand off to the node runner. `exec` replaces this
 # bash process so signal handling stays clean.
 exec node /usr/local/bin/sandbox-runner.mjs

@@ -16,8 +16,8 @@
 # silently in production:
 #   cd relayer/sandbox-image
 #   flyctl auth docker                       # one-time, pipes creds to docker
-#   docker build --platform linux/amd64 -t registry.fly.io/ghbounty-sandbox:v2 .
-#   docker push registry.fly.io/ghbounty-sandbox:v2
+#   docker build --platform linux/amd64 -t registry.fly.io/ghbounty-sandbox:v3 .
+#   docker push registry.fly.io/ghbounty-sandbox:v3
 #
 # We pin --platform=linux/amd64 because Fly machines are x86_64 and
 # building on Apple Silicon would otherwise produce arm64 binaries
@@ -27,6 +27,10 @@ FROM debian:bookworm-slim
 
 # Single layer for OS prerequisites — keeps image small and avoids
 # multiple apt-update round-trips.
+#
+# `iptables` is required for the GHB-74 boot-time egress allowlist
+# (firewall.sh). On Debian bookworm this installs the nftables-backed
+# iptables binary, which works the same way for our use case.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
@@ -40,6 +44,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     jq \
     unzip \
     xz-utils \
+    iptables \
  && rm -rf /var/lib/apt/lists/*
 
 # ── Node.js 20 LTS via nodesource (pnpm via corepack) ───────────────────
@@ -104,10 +109,14 @@ WORKDIR /work
 
 COPY entrypoint.sh /usr/local/bin/sandbox-entrypoint
 COPY runner.mjs    /usr/local/bin/sandbox-runner.mjs
-RUN chmod +x /usr/local/bin/sandbox-entrypoint /usr/local/bin/sandbox-runner.mjs
+COPY firewall.sh   /usr/local/bin/sandbox-firewall
+RUN chmod +x /usr/local/bin/sandbox-entrypoint \
+              /usr/local/bin/sandbox-runner.mjs \
+              /usr/local/bin/sandbox-firewall
 
 # Default command: invoke the entrypoint. With SANDBOX_SPEC unset it
 # falls back to the smoke-test path (toolchain versions); with the spec
-# set it `exec`s the node runner that does clone + detect + install +
-# test + JSON output. See entrypoint.sh and runner.mjs.
+# set it runs the GHB-74 firewall (egress allowlist) then `exec`s the
+# node runner that does clone + detect + install + test + JSON output.
+# See entrypoint.sh, firewall.sh, and runner.mjs.
 CMD ["/usr/local/bin/sandbox-entrypoint"]

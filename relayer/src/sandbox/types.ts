@@ -163,9 +163,24 @@ export interface DetectOptions {
  * http.extraHeader, so private repos and 5000-req/h rate limits work.
  * It NEVER ends up in the URL or git config.
  *
+ * `customCommand` MUST come from a trusted source (relayer config /
+ * bounty-creator UI), NEVER from the PR's content. The runner
+ * executes it via `sh -c` which is full RCE inside the sandbox by
+ * design — that's fine when the input is trusted, catastrophic
+ * otherwise. See THREAT_MODEL.md "T-7" for the full reasoning.
+ *
  * `testTimeoutS` is the inner deadline for the install + test phases
  * combined. Should be < SandboxConfig.timeoutS to leave the relayer
  * room to read the result before Fly tears the machine down.
+ *
+ * `resultNonce` is a per-run cryptographically-random hex string
+ * (GHB-74). The runner emits its result line with prefix
+ *   __SANDBOX_RESULT_<nonce>__:<json>
+ * and the executor only trusts lines bearing the same nonce. Stops a
+ * malicious PR from spoofing a "tests passed" line in its own stdout
+ * (the PR can't see SANDBOX_SPEC env unless it explicitly reads it,
+ * but even then, scrubbing the env before exec'ing test runners +
+ * the nonce check are belt-and-suspenders).
  */
 export interface SandboxSpec {
   repoUrl: string;
@@ -174,6 +189,7 @@ export interface SandboxSpec {
   customCommand: string | null;
   testTimeoutS: number;
   gitToken: string | null;
+  resultNonce: string;
 }
 
 /**

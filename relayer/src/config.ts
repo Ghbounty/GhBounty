@@ -155,11 +155,14 @@ export function loadConfig(): RelayerConfig {
   // local devs don't have to think about them.
   const flyToken = process.env.FLY_API_TOKEN?.trim() || null;
   const flyApp = process.env.FLY_SANDBOX_APP?.trim() || null;
-  // GHB-72 ships the runner.mjs in v2; v1 only has the smoke-test
-  // entrypoint and would silently no-op against a real SANDBOX_SPEC.
+  // GHB-72 added the runner.mjs (v2). GHB-74 added the boot-time
+  // egress allowlist + nonce-validated result marker (v3). Older tags
+  // are kept around for rollback only — running v2 against the GHB-74
+  // executor would fail spec validation (missing resultNonce) and
+  // also leave the sandbox with full internet egress.
   const flyImage =
     process.env.FLY_SANDBOX_IMAGE?.trim() ||
-    "registry.fly.io/ghbounty-sandbox:v2";
+    "registry.fly.io/ghbounty-sandbox:v3";
   const flyRegion = process.env.FLY_SANDBOX_REGION?.trim() || "iad";
   const flyTimeout = Number(process.env.FLY_SANDBOX_TIMEOUT_S ?? "300");
   const flyCpus = Number(process.env.FLY_SANDBOX_CPUS ?? "2");
