@@ -31,6 +31,8 @@
  * threw — leaked machines cost real money on Fly.
  */
 
+import { spawn } from "node:child_process";
+
 import {
   destroySandbox,
   spawnSandbox,
@@ -47,17 +49,39 @@ import type {
 } from "./types.js";
 
 const RESULT_PREFIX = "__SANDBOX_RESULT__:";
-const FLY_LOGS_LOOKBACK_LINES = 200;
+const FLYCTL_LOGS_TIMEOUT_MS = 15_000;
+
+/**
+ * Signature for the log-fetcher used by the executor. Default impl
+ * shells out to `flyctl logs`; tests inject a function that returns
+ * pre-canned lines so they don't need flyctl on the test runner.
+ *
+ * Why subprocess flyctl: the Fly Machines API doesn't expose machine
+ * stdout, the legacy /api/v1/apps/X/logs endpoint rejects org-deploy
+ * tokens with 401, and the GraphQL schema has no `logs` query. flyctl
+ * authenticates via FLY_API_TOKEN env (same value the org token uses
+ * for the Machines API), so the subprocess inherits the right auth
+ * automatically.
+ */
+export type LogFetcher = (
+  cfg: SandboxConfig & { apiToken: string; appName: string },
+  machineId: string,
+) => Promise<string[]>;
 
 /**
  * Run the test suite for a PR inside an ephemeral Fly machine.
  * Always returns a typed `ExecutorResult` — never throws for
  * "expected" failure modes (timeout, infra, git, etc.). Throws only
  * when the input is malformed before we even reach Fly.
+ *
+ * `fetchLogs` defaults to subprocess `flyctl logs`. Tests pass a
+ * stub that returns pre-canned lines so they don't need flyctl on
+ * the test runner.
  */
 export async function runSandboxedTests(
   cfg: SandboxConfig,
   opts: ExecutorOptions,
+  fetchLogs: LogFetcher = defaultFetchLogsViaFlyctl,
 ): Promise<ExecutorResult> {
   if (!cfg.apiToken || !cfg.appName) {
     return {
@@ -127,6 +151,7 @@ export async function runSandboxedTests(
       const parsed = await fetchAndParseResult(
         cfg as SandboxConfig & { apiToken: string; appName: string },
         handle.machineId,
+        fetchLogs,
       );
       if (parsed) {
         result = parsed;
@@ -163,6 +188,7 @@ export async function runSandboxedTests(
 async function fetchAndParseResult(
   cfg: SandboxConfig & { apiToken: string; appName: string },
   machineId: string,
+  fetchLogs: LogFetcher,
 ): Promise<ExecutorResult | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const lines = await fetchLogs(cfg, machineId);
@@ -173,37 +199,72 @@ async function fetchAndParseResult(
   return null;
 }
 
-async function fetchLogs(
+/**
+ * Default `LogFetcher`: shell out to `flyctl logs`. Captures stdout
+ * for up to `FLYCTL_LOGS_TIMEOUT_MS`, then resolves with the lines.
+ *
+ * We pass FLY_API_TOKEN through as an env var so flyctl uses the same
+ * credential the executor uses for the Machines API. flyctl reads
+ * this env when its config dir doesn't have a logged-in session,
+ * which is the case in production containers.
+ *
+ * `--no-tail` is critical: it makes flyctl exit after dumping the
+ * existing log buffer instead of streaming forever.
+ */
+async function defaultFetchLogsViaFlyctl(
   cfg: SandboxConfig & { apiToken: string; appName: string },
   machineId: string,
 ): Promise<string[]> {
-  // Fly's log API endpoint:
-  // GET https://api.fly.io/api/v1/apps/{app}/logs?machine={id}
-  // Returns a JSON array of {message, timestamp, …} entries.
-  const url = `https://api.fly.io/api/v1/apps/${cfg.appName}/logs?machine=${machineId}&limit=${FLY_LOGS_LOOKBACK_LINES}`;
-  try {
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${cfg.apiToken}` },
+  return await new Promise<string[]>((resolve) => {
+    const child = spawn(
+      "flyctl",
+      [
+        "logs",
+        "--app", cfg.appName,
+        "--machine", machineId,
+        "--no-tail",
+      ],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, FLY_API_TOKEN: cfg.apiToken },
+      },
+    );
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => {
+      stdout += c.toString("utf-8");
     });
-    if (!res.ok) {
-      log.debug("sandbox: log fetch non-OK", {
+    child.stderr.on("data", (c) => {
+      stderr += c.toString("utf-8");
+    });
+
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+    }, FLYCTL_LOGS_TIMEOUT_MS);
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      // ENOENT is the most common case in dev environments without
+      // flyctl installed — log loudly so the operator can install it.
+      log.debug("sandbox: flyctl logs subprocess errored", {
         machineId,
-        status: res.status,
+        err: String(err),
       });
-      return [];
-    }
-    const body = (await res.json()) as { data?: Array<{ attributes?: { message?: string } }> };
-    const entries = body.data ?? [];
-    return entries
-      .map((e) => e.attributes?.message ?? "")
-      .filter((m) => m.length > 0);
-  } catch (err) {
-    log.debug("sandbox: log fetch threw", {
-      machineId,
-      err: String(err),
+      resolve([]);
     });
-    return [];
-  }
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (code !== 0 && stderr) {
+        log.debug("sandbox: flyctl logs non-zero exit", {
+          machineId,
+          code,
+          stderr: stderr.slice(0, 300),
+        });
+      }
+      resolve(stdout.split("\n"));
+    });
+  });
 }
 
 /**
