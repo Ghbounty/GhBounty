@@ -620,6 +620,31 @@ describe("validateCustomCommand", () => {
     );
   });
 
+  // Issue #50: DEL + C1 control range (0x7F-0x9F) are also rejected.
+  test("rejects DEL (0x7F)", () => {
+    expect(() => validateCustomCommand("pnpm test\x7f")).toThrow(
+      /control characters/,
+    );
+  });
+
+  test("rejects low C1 control byte (0x80)", () => {
+    expect(() => validateCustomCommand("pnpm test\x80")).toThrow(
+      /control characters/,
+    );
+  });
+
+  test("rejects mid C1 control byte (0x90)", () => {
+    expect(() => validateCustomCommand("pnpm test\x90")).toThrow(
+      /control characters/,
+    );
+  });
+
+  test("rejects high C1 control byte (0x9F)", () => {
+    expect(() => validateCustomCommand("pnpm test\x9f")).toThrow(
+      /control characters/,
+    );
+  });
+
   test("rejects values longer than 4096 chars", () => {
     const huge = "x".repeat(4097);
     expect(() => validateCustomCommand(huge)).toThrow(/too long/);

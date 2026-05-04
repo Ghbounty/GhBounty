@@ -458,8 +458,13 @@ export function validateCustomCommand(
   // Reject NULs and ASCII control chars except tab/CR/LF — they have
   // no business in a shell command and historically cause runners
   // grief (NUL truncates argv, raw \r tricks line parsers, etc.).
+  //
+  // Issue #50: also rejects DEL (0x7F) and the C1 control range
+  // (0x80-0x9F). DEL is a hold-over control byte still honored by
+  // some terminals, and the C1 set is the Latin-1 sibling of C0
+  // that legacy parsers occasionally interpret as control sequences.
   // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(trimmed)) {
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/.test(trimmed)) {
     throw new Error("customCommand contains forbidden control characters");
   }
   return trimmed;
