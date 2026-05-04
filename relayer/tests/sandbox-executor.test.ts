@@ -620,6 +620,12 @@ describe("validateCustomCommand", () => {
     );
   });
 
+  test("rejects DEL (#50)", () => {
+    expect(() => validateCustomCommand("pnpm test\x7f")).toThrow(
+      /control characters/,
+    );
+  });
+
   test("rejects values longer than 4096 chars", () => {
     const huge = "x".repeat(4097);
     expect(() => validateCustomCommand(huge)).toThrow(/too long/);
