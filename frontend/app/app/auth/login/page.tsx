@@ -14,7 +14,7 @@ import { useAuth, usePrivyBackend } from "@/lib/auth-context";
  * Legacy mode (NEXT_PUBLIC_USE_PRIVY=0): old email + password form.
  */
 export default function LoginPage() {
-  const { user, ready, loginByEmail } = useAuth();
+  const { user, ready, pendingOnboarding, loginByEmail } = useAuth();
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,10 +22,19 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!ready) return;
+    // Privy authed but no Supabase profile row yet — first-time login via
+    // the wallet button on this page. Without this branch the button
+    // sticks on "Connecting…" forever because the user state never
+    // populates (loadUser returns null with no profile). Mirrors the
+    // `/app/page.tsx` route guard.
+    if (pendingOnboarding) {
+      router.replace("/app/onboarding");
+      return;
+    }
     if (user) {
       router.replace(user.role === "company" ? "/app/company" : "/app/dev");
     }
-  }, [ready, user, router]);
+  }, [ready, user, pendingOnboarding, router]);
 
   function onPrivyLogin() {
     setSubmitting(true);
