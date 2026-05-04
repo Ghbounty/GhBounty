@@ -1,5 +1,10 @@
 import { log } from "./logger.js";
-import { scorePR, type OpusReport, type ScorePRDeps } from "./opus.js";
+import {
+  scorePR,
+  type OpusReport,
+  type PromptTestResult,
+  type ScorePRDeps,
+} from "./opus.js";
 
 export type EvaluationSource = "stub" | "opus";
 
@@ -12,6 +17,14 @@ export interface AnalyzeInput {
    * Null/empty = relayer falls back to the default rubric.
    */
   evaluationCriteria?: string | null;
+  /**
+   * GHB-73: pre-flattened test execution result from the sandbox. The
+   * submission handler maps the executor's discriminated union into this
+   * stable shape; null means no useful data (sandbox disabled, infra
+   * failure, no_runner, etc.) and Sonnet's prompt instructs it to
+   * penalize `test_coverage` accordingly.
+   */
+  testResult?: PromptTestResult | null;
 }
 
 export interface AnalyzeResult {
@@ -71,6 +84,7 @@ export async function analyzeSubmission(
       {
         prUrl: input.prUrl,
         evaluationCriteria: input.evaluationCriteria ?? null,
+        testResult: input.testResult ?? null,
       },
       {
         apiKey: opts.anthropicApiKey,

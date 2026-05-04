@@ -221,11 +221,11 @@ describe("runSandboxedTests — disabled state", () => {
   });
 });
 
-// Helper: build a fetch mock that responds based on URL pattern.
+// Helper: build a fetch mock for spawn/wait/destroy (Machines API
+// only — logs are now fetched via subprocess, NOT via fetch).
 function mockFlyFetch(handlers: {
   onCreate?: () => Response | Promise<Response>;
   onPoll?: (callIndex: number) => Response | Promise<Response>;
-  onLogs?: () => Response | Promise<Response>;
   onDestroy?: () => Response | Promise<Response>;
 }): { calls: { url: string; method: string }[] } {
   const calls: { url: string; method: string }[] = [];
@@ -245,9 +245,6 @@ function mockFlyFetch(handlers: {
           ? handlers.onPoll(idx)
           : json(200, { id: "m_x", state: "stopped", exit_event: { exit_code: 0 } });
       }
-      if (url.includes("/logs") && method === "GET") {
-        return handlers.onLogs ? handlers.onLogs() : json(200, { data: [] });
-      }
       if (url.includes("/machines/") && method === "DELETE") {
         return handlers.onDestroy
           ? handlers.onDestroy()
@@ -266,8 +263,13 @@ function json(status: number, body: unknown): Response {
   });
 }
 
-function logEntry(message: string) {
-  return { attributes: { message } };
+/**
+ * Build a `LogFetcher` test stub that returns the given lines.
+ * Replaces what the default subprocess-flyctl impl would return,
+ * so tests run without a real flyctl binary.
+ */
+function stubLogs(lines: string[]) {
+  return async () => lines;
 }
 
 describe("runSandboxedTests — happy path", () => {
@@ -280,60 +282,53 @@ describe("runSandboxedTests — happy path", () => {
       stdoutTail: "PASS",
       stderrTail: "",
     };
-    const { calls } = mockFlyFetch({
-      onLogs: () =>
-        json(200, {
-          data: [
-            logEntry("[install] up to date"),
-            logEntry(`__SANDBOX_RESULT__:${JSON.stringify(runnerResult)}`),
-          ],
-        }),
-    });
+    const { calls } = mockFlyFetch({});
+    const fetchLogs = stubLogs([
+      "[install] up to date",
+      `__SANDBOX_RESULT__:${JSON.stringify(runnerResult)}`,
+    ]);
 
-    const result = await runSandboxedTests(baseCfg, {
-      repoUrl: "https://github.com/x/y.git",
-      baseRef: "main",
-      prNumber: 42,
-    });
+    const result = await runSandboxedTests(
+      baseCfg,
+      { repoUrl: "https://github.com/x/y.git", baseRef: "main", prNumber: 42 },
+      fetchLogs,
+    );
     expect(result.kind).toBe("exited");
     if (result.kind === "exited") {
       expect(result.runner.kind).toBe("pnpm");
       expect(result.exitCode).toBe(0);
     }
 
-    // Confirms full lifecycle hit Fly: create + at least one poll + logs + destroy.
+    // Confirms the Machines API lifecycle hit Fly: create + poll + destroy
+    // (logs are now via subprocess, not fetch — covered by the injected stub).
     const methods = calls.map((c) => c.method);
     expect(methods).toContain("POST"); // create
-    expect(methods).toContain("GET"); // poll + logs
+    expect(methods).toContain("GET"); // poll
     expect(methods).toContain("DELETE"); // destroy
   });
 
   test("forwards SANDBOX_SPEC env var with the right shape on spawn", async () => {
-    const { calls } = mockFlyFetch({
-      onLogs: () =>
-        json(200, {
-          data: [
-            logEntry(
-              `__SANDBOX_RESULT__:${JSON.stringify({
-                status: "no_runner",
-                reason: "n/a",
-                durationMs: 10,
-              })}`,
-            ),
-          ],
-        }),
-    });
+    const { calls } = mockFlyFetch({});
+    const fetchLogs = stubLogs([
+      `__SANDBOX_RESULT__:${JSON.stringify({
+        status: "no_runner",
+        reason: "n/a",
+        durationMs: 10,
+      })}`,
+    ]);
 
-    await runSandboxedTests(baseCfg, {
-      repoUrl: "https://github.com/foo/bar.git",
-      baseRef: "develop",
-      prNumber: 7,
-      customCommand: "make test",
-    });
+    await runSandboxedTests(
+      baseCfg,
+      {
+        repoUrl: "https://github.com/foo/bar.git",
+        baseRef: "develop",
+        prNumber: 7,
+        customCommand: "make test",
+      },
+      fetchLogs,
+    );
 
     // The first POST is the machine create — its body has the env spec.
-    // We need to grab it; mockFlyFetch only records URL+method, so we
-    // re-stub fetch + inspect via a side channel.
     expect(calls[0]?.method).toBe("POST");
     expect(calls[0]?.url).toMatch(/\/machines$/);
   });
@@ -341,26 +336,20 @@ describe("runSandboxedTests — happy path", () => {
 
 describe("runSandboxedTests — sandbox failure modes", () => {
   test("git_error from runner → propagates kind=git_error", async () => {
-    mockFlyFetch({
-      onLogs: () =>
-        json(200, {
-          data: [
-            logEntry(
-              `__SANDBOX_RESULT__:${JSON.stringify({
-                status: "git_error",
-                reason: "Repository not found",
-                durationMs: 3000,
-              })}`,
-            ),
-          ],
-        }),
-    });
+    mockFlyFetch({});
+    const fetchLogs = stubLogs([
+      `__SANDBOX_RESULT__:${JSON.stringify({
+        status: "git_error",
+        reason: "Repository not found",
+        durationMs: 3000,
+      })}`,
+    ]);
 
-    const result = await runSandboxedTests(baseCfg, {
-      repoUrl: "https://github.com/private/repo.git",
-      baseRef: "main",
-      prNumber: 1,
-    });
+    const result = await runSandboxedTests(
+      baseCfg,
+      { repoUrl: "https://github.com/private/repo.git", baseRef: "main", prNumber: 1 },
+      fetchLogs,
+    );
     expect(result.kind).toBe("git_error");
     if (result.kind === "git_error") {
       expect(result.reason).toMatch(/Repository not found/);
@@ -368,29 +357,23 @@ describe("runSandboxedTests — sandbox failure modes", () => {
   });
 
   test("install_error surfaces with runner info", async () => {
-    mockFlyFetch({
-      onLogs: () =>
-        json(200, {
-          data: [
-            logEntry(
-              `__SANDBOX_RESULT__:${JSON.stringify({
-                status: "install_error",
-                runner: { kind: "npm", command: ["npm", "test"], markers: ["package.json"] },
-                exitCode: 127,
-                durationMs: 1234,
-                stdoutTail: "",
-                stderrTail: "command not found",
-              })}`,
-            ),
-          ],
-        }),
-    });
+    mockFlyFetch({});
+    const fetchLogs = stubLogs([
+      `__SANDBOX_RESULT__:${JSON.stringify({
+        status: "install_error",
+        runner: { kind: "npm", command: ["npm", "test"], markers: ["package.json"] },
+        exitCode: 127,
+        durationMs: 1234,
+        stdoutTail: "",
+        stderrTail: "command not found",
+      })}`,
+    ]);
 
-    const result = await runSandboxedTests(baseCfg, {
-      repoUrl: "https://github.com/x/y.git",
-      baseRef: "main",
-      prNumber: 1,
-    });
+    const result = await runSandboxedTests(
+      baseCfg,
+      { repoUrl: "https://github.com/x/y.git", baseRef: "main", prNumber: 1 },
+      fetchLogs,
+    );
     expect(result.kind).toBe("install_error");
     if (result.kind === "install_error") {
       expect(result.runner.kind).toBe("npm");
@@ -398,25 +381,18 @@ describe("runSandboxedTests — sandbox failure modes", () => {
     }
   });
 
-  // The executor polls Fly logs 5× with 1.5 s sleep before giving up
-  // on finding the result marker — that's ~7.5 s real wall-clock,
-  // longer than vitest's default 5 s test cap.
+  // The executor polls 5× with 1.5 s sleep before giving up on the
+  // marker — that's ~7.5 s real wall-clock, longer than vitest's
+  // default 5 s test cap.
   test("machine exits but emits no parseable result → infra", async () => {
-    mockFlyFetch({
-      onLogs: () =>
-        json(200, {
-          data: [
-            logEntry("random log"),
-            logEntry("more log without the marker"),
-          ],
-        }),
-    });
+    mockFlyFetch({});
+    const fetchLogs = stubLogs(["random log", "more log without the marker"]);
 
-    const result = await runSandboxedTests(baseCfg, {
-      repoUrl: "https://github.com/x/y.git",
-      baseRef: "main",
-      prNumber: 1,
-    });
+    const result = await runSandboxedTests(
+      baseCfg,
+      { repoUrl: "https://github.com/x/y.git", baseRef: "main", prNumber: 1 },
+      fetchLogs,
+    );
     expect(result.kind).toBe("infra");
     if (result.kind === "infra") {
       expect(result.reason).toMatch(/no parseable result/);

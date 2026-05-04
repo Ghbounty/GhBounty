@@ -704,4 +704,213 @@ describe("handleSubmission", () => {
 
     expect(callGenLayer).not.toHaveBeenCalled();
   });
+
+  /* ============================================================== */
+  /* GHB-73: sandbox executor integration                            */
+  /* ============================================================== */
+
+  /**
+   * Sandbox enabled in config (token + app set) but real Fly never
+   * reached because we inject `runSandbox` for every test below.
+   */
+  const enabledSandboxCfg = {
+    apiToken: "fly_test_token",
+    appName: "ghbounty-sandbox-test",
+    image: "registry.fly.io/ghbounty-sandbox:test",
+    region: "iad",
+    timeoutS: 300,
+    cpus: 2,
+    memoryMb: 2048,
+  };
+
+  test("sandbox disabled (no apiToken): runSandbox NOT invoked, analyze sees testResult=null", async () => {
+    const runSandbox = vi.fn();
+    const analyze = vi.fn(async () => opusResult);
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      sandbox: { ...enabledSandboxCfg, apiToken: null },
+      runSandbox,
+      analyze,
+    });
+    expect(runSandbox).not.toHaveBeenCalled();
+    expect(analyze).toHaveBeenCalledOnce();
+    expect(analyze.mock.calls[0]![0].testResult).toBeNull();
+  });
+
+  test("sandbox disabled (no appName): same — skipped, testResult=null", async () => {
+    const runSandbox = vi.fn();
+    const analyze = vi.fn(async () => opusResult);
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      sandbox: { ...enabledSandboxCfg, appName: null },
+      runSandbox,
+      analyze,
+    });
+    expect(runSandbox).not.toHaveBeenCalled();
+    expect(analyze.mock.calls[0]![0].testResult).toBeNull();
+  });
+
+  test("sandbox not in deps (legacy): no spawn, analyze gets null", async () => {
+    const analyze = vi.fn(async () => opusResult);
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      analyze,
+    });
+    expect(analyze.mock.calls[0]![0].testResult).toBeNull();
+  });
+
+  test("sandbox: kind=exited exitCode=0 → testResult.status='passed' with runner kind", async () => {
+    const runSandbox = vi.fn(async () => ({
+      kind: "exited" as const,
+      runner: { kind: "pytest" as const, command: ["pytest"], markers: ["pyproject.toml"] },
+      exitCode: 0,
+      durationMs: 12345,
+      stdoutTail: "PASS test_foo",
+      stderrTail: "",
+    }));
+    const analyze = vi.fn(async () => opusResult);
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      sandbox: enabledSandboxCfg,
+      runSandbox,
+      analyze,
+    });
+    expect(runSandbox).toHaveBeenCalledOnce();
+    // The spec passed to runSandbox was built from the PR URL.
+    const [, opts] = runSandbox.mock.calls[0]!;
+    expect(opts.repoUrl).toBe("https://github.com/o/r.git");
+    expect(opts.prNumber).toBe(1);
+    expect(opts.baseRef).toBe("main");
+    // Sonnet-bound testResult shape.
+    const tr = analyze.mock.calls[0]![0].testResult;
+    expect(tr).toMatchObject({
+      status: "passed",
+      runner: "pytest",
+      durationMs: 12345,
+    });
+    expect(tr.outputTail).toContain("PASS test_foo");
+  });
+
+  test("sandbox: kind=exited non-zero exit → testResult.status='failed'", async () => {
+    const runSandbox = vi.fn(async () => ({
+      kind: "exited" as const,
+      runner: { kind: "cargo" as const, command: ["cargo", "test"], markers: ["Cargo.toml"] },
+      exitCode: 101,
+      durationMs: 9999,
+      stdoutTail: "",
+      stderrTail: "test failed: assertion `left == right`",
+    }));
+    const analyze = vi.fn(async () => opusResult);
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      sandbox: enabledSandboxCfg,
+      runSandbox,
+      analyze,
+    });
+    const tr = analyze.mock.calls[0]![0].testResult;
+    expect(tr.status).toBe("failed");
+    expect(tr.runner).toBe("cargo");
+    expect(tr.outputTail).toContain("assertion");
+  });
+
+  test.each([
+    {
+      label: "kind=timeout",
+      result: {
+        kind: "timeout" as const,
+        phase: "test" as const,
+        runner: { kind: "anchor" as const, command: ["anchor", "test"], markers: ["Anchor.toml"] },
+        durationMs: 240_000,
+        stdoutTail: "",
+        stderrTail: "",
+      },
+    },
+    {
+      label: "kind=install_error",
+      result: {
+        kind: "install_error" as const,
+        runner: { kind: "npm" as const, command: ["npm", "test"], markers: ["package.json"] },
+        exitCode: 127,
+        durationMs: 4321,
+        stdoutTail: "",
+        stderrTail: "command not found",
+      },
+    },
+    {
+      label: "kind=git_error",
+      result: {
+        kind: "git_error" as const,
+        reason: "Repository not found",
+        durationMs: 3000,
+      },
+    },
+    {
+      label: "kind=no_runner",
+      result: { kind: "no_runner" as const, reason: "no markers", durationMs: 2000 },
+    },
+    {
+      label: "kind=infra",
+      result: {
+        kind: "infra" as const,
+        reason: "Fly create failed",
+        durationMs: 1500,
+      },
+    },
+  ])("sandbox: $label → testResult=null (Sonnet sees the no-results prompt)", async ({ result }) => {
+    const runSandbox = vi.fn(async () => result);
+    const analyze = vi.fn(async () => opusResult);
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      sandbox: enabledSandboxCfg,
+      runSandbox,
+      analyze,
+    });
+    expect(runSandbox).toHaveBeenCalledOnce();
+    expect(analyze.mock.calls[0]![0].testResult).toBeNull();
+  });
+
+  test("sandbox: thrown exception → testResult=null (handler doesn't crash)", async () => {
+    const runSandbox = vi.fn(async () => {
+      throw new Error("network unreachable");
+    });
+    const analyze = vi.fn(async () => opusResult);
+    const r = await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      sandbox: enabledSandboxCfg,
+      runSandbox,
+      analyze,
+    });
+    expect(analyze.mock.calls[0]![0].testResult).toBeNull();
+    // The submission still completes end-to-end with the analyzer's score.
+    expect(r.score).toBe(7);
+  });
+
+  test("sandbox: unparseable PR URL → skipped, testResult=null", async () => {
+    const runSandbox = vi.fn();
+    const analyze = vi.fn(async () => opusResult);
+    await handleSubmission(buildSub("not-a-github-url"), {
+      ...baseDeps,
+      db: null,
+      scorer: buildScorer().client,
+      sandbox: enabledSandboxCfg,
+      runSandbox,
+      analyze,
+    });
+    expect(runSandbox).not.toHaveBeenCalled();
+    expect(analyze.mock.calls[0]![0].testResult).toBeNull();
+  });
 });

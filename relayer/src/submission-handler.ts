@@ -1,7 +1,7 @@
 import { type Db } from "@ghbounty/db";
 
 import { analyzeSubmission, type AnalyzeResult } from "./analyzer.js";
-import { type GenLayerConfig } from "./config.js";
+import { type GenLayerConfig, type SandboxConfig } from "./config.js";
 import {
   getBountyDisplayInfo,
   getEvaluationCriteria,
@@ -22,6 +22,9 @@ import {
 } from "./genlayer/client.js";
 import { buildNarrativeReport } from "./genlayer/narrative.js";
 import { log } from "./logger.js";
+import { type PromptTestResult } from "./opus.js";
+import { runSandboxedTests } from "./sandbox/index.js";
+import type { ExecutorResult } from "./sandbox/index.js";
 import { type ScorerClient } from "./scorer.js";
 import { classifyByThreshold, type ThresholdOutcome } from "./threshold.js";
 import { type DecodedSubmission } from "./watcher.js";
@@ -44,6 +47,12 @@ export interface SubmissionHandlerDeps {
    * entirely and the evaluation row keeps `genlayer_*` null.
    */
   genlayer?: GenLayerConfig | null;
+  /**
+   * GHB-73: sandbox config (Fly machine spawn for in-PR test execution).
+   * When `apiToken` or `appName` is unset the handler skips the spawn
+   * and feeds Sonnet the "no test results available" prompt section.
+   */
+  sandbox?: SandboxConfig | null;
   /** For tests: inject the analyzer so we don't hit real APIs. */
   analyze?: typeof analyzeSubmission;
   /**
@@ -51,6 +60,11 @@ export interface SubmissionHandlerDeps {
    * Must match the shape of the real `submitToBountyJudge`.
    */
   callGenLayer?: typeof submitToBountyJudge;
+  /**
+   * For tests: inject the sandbox call so we don't spawn real Fly
+   * machines. Must match the shape of the real `runSandboxedTests`.
+   */
+  runSandbox?: typeof runSandboxedTests;
 }
 
 export interface HandleSubmissionResult {
@@ -107,6 +121,14 @@ export async function handleSubmission(
     ? await getEvaluationCriteria(deps.db, sub.bounty.toBase58())
     : null;
 
+  // GHB-73: spin up the sandbox + run the PR's tests BEFORE asking Sonnet
+  // to score, so Sonnet's prompt includes a real pass/fail signal. The
+  // call is best-effort — any failure (disabled, infra, timeout,
+  // git_error, install_error, no_runner) leaves `testResult` null and
+  // the prompt then tells Sonnet to penalize `test_coverage` from the
+  // diff alone.
+  const testResult = await runSandboxIfEnabled(sub, deps);
+
   const analyze = deps.analyze ?? analyzeSubmission;
   const { score, source, reasoning, report, reportHash } = await analyze(
     {
@@ -114,6 +136,7 @@ export async function handleSubmission(
       prUrl: sub.prUrl,
       opusReportHash: sub.opusReportHash,
       evaluationCriteria: criteria,
+      testResult,
     },
     {
       stubScore: deps.stubScore,
@@ -362,4 +385,168 @@ async function emitEvaluationNotifications(
       score: ctx.score,
     },
   });
+}
+
+// ── GHB-73: sandbox orchestration ─────────────────────────────────────
+
+/**
+ * Run the PR through the sandbox executor and flatten the result into
+ * the shape Sonnet's prompt builder consumes. Returns `null` on any
+ * non-success outcome (and on any thrown exception) — the analyzer
+ * then renders the "no test results available" prompt section.
+ *
+ * Why null on failure (rather than a failure-flavored PromptTestResult):
+ *   - Keeps the prompt section's two paths cleanly separated: "we ran
+ *     and here's what happened" vs "we couldn't run".
+ *   - Infra / disabled / timeout aren't the developer's fault and we
+ *     don't want Sonnet to confuse "tests failed" with "we couldn't
+ *     execute tests". Both pull `test_coverage` down, but for very
+ *     different reasons. The handler logs the distinction.
+ */
+async function runSandboxIfEnabled(
+  sub: DecodedSubmission,
+  deps: SubmissionHandlerDeps,
+): Promise<PromptTestResult | null> {
+  if (!deps.sandbox || !deps.sandbox.apiToken || !deps.sandbox.appName) {
+    log.debug("sandbox skipped: not configured", {
+      submission: sub.pda.toBase58(),
+    });
+    return null;
+  }
+  const parsed = parseGithubPrUrl(sub.prUrl);
+  if (!parsed) {
+    log.warn("sandbox skipped: unparseable PR URL", {
+      submission: sub.pda.toBase58(),
+      prUrl: sub.prUrl,
+    });
+    return null;
+  }
+
+  const runSandbox = deps.runSandbox ?? runSandboxedTests;
+  let result: ExecutorResult;
+  try {
+    result = await runSandbox(deps.sandbox, {
+      // We default to "main" because the runner only consumes baseRef
+      // for `git init -b` — the actual fetch is `pull/N/head` which is
+      // independent of the base branch. Saves a GitHub API roundtrip.
+      repoUrl: `https://github.com/${parsed.owner}/${parsed.repo}.git`,
+      baseRef: "main",
+      prNumber: parsed.prNumber,
+    });
+  } catch (err) {
+    // Defensive — runSandboxedTests is documented as "never throws for
+    // expected failure modes" but if it somehow does, we don't want it
+    // to take down the whole submission.
+    log.warn("sandbox call threw", {
+      submission: sub.pda.toBase58(),
+      prUrl: sub.prUrl,
+      err: String(err),
+    });
+    return null;
+  }
+
+  return executorResultToPromptShape(result, sub.pda.toBase58());
+}
+
+/**
+ * Map ExecutorResult discriminated union → PromptTestResult, with full
+ * structured logging at this seam so ops can trace any submission's
+ * sandbox outcome without re-parsing prompt strings.
+ *
+ * Only `kind: "exited"` produces a non-null result — everything else
+ * returns null so the prompt's "no test results" path fires (see
+ * runSandboxIfEnabled doc for why).
+ */
+function executorResultToPromptShape(
+  result: ExecutorResult,
+  submissionPda: string,
+): PromptTestResult | null {
+  switch (result.kind) {
+    case "exited": {
+      const detail =
+        result.exitCode === 0
+          ? `tests passed (exit code 0)`
+          : `tests failed (exit code ${result.exitCode ?? "unknown"})`;
+      log.info("sandbox: exited", {
+        submission: submissionPda,
+        runner: result.runner.kind,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+      });
+      return {
+        status: result.exitCode === 0 ? "passed" : "failed",
+        runner: result.runner.kind,
+        durationMs: result.durationMs,
+        detail,
+        outputTail: combineOutputTails(result.stdoutTail, result.stderrTail),
+      };
+    }
+    case "timeout":
+      log.warn("sandbox: timeout", {
+        submission: submissionPda,
+        phase: result.phase,
+        runner: result.runner.kind,
+        durationMs: result.durationMs,
+      });
+      return null;
+    case "install_error":
+      log.warn("sandbox: install_error", {
+        submission: submissionPda,
+        runner: result.runner.kind,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+      });
+      return null;
+    case "git_error":
+      log.warn("sandbox: git_error", {
+        submission: submissionPda,
+        reason: result.reason,
+        durationMs: result.durationMs,
+      });
+      return null;
+    case "no_runner":
+      log.info("sandbox: no_runner — repo has no detectable test markers", {
+        submission: submissionPda,
+        durationMs: result.durationMs,
+      });
+      return null;
+    case "disabled":
+      log.debug("sandbox: disabled", {
+        submission: submissionPda,
+        reason: result.reason,
+      });
+      return null;
+    case "infra":
+      log.warn("sandbox: infra error", {
+        submission: submissionPda,
+        reason: result.reason,
+        durationMs: result.durationMs,
+      });
+      return null;
+  }
+}
+
+function combineOutputTails(stdout: string, stderr: string): string | null {
+  const out = stdout?.trim() ?? "";
+  const err = stderr?.trim() ?? "";
+  if (!out && !err) return null;
+  if (!err) return out;
+  if (!out) return err;
+  return `--- stdout (tail) ---\n${out}\n--- stderr (tail) ---\n${err}`;
+}
+
+/**
+ * Parse a GitHub PR URL into the parts the SandboxSpec needs. Returns
+ * null on shapes we don't recognize so the caller can skip the sandbox
+ * cleanly (e.g. legacy submissions with non-GitHub URLs).
+ */
+function parseGithubPrUrl(
+  url: string,
+): { owner: string; repo: string; prNumber: number } | null {
+  const m = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/i);
+  if (!m) return null;
+  const [, owner, repo, num] = m;
+  const prNumber = Number(num);
+  if (!Number.isInteger(prNumber) || prNumber <= 0) return null;
+  return { owner: owner!, repo: repo!.replace(/\.git$/, ""), prNumber };
 }

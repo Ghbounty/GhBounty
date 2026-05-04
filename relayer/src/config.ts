@@ -155,9 +155,11 @@ export function loadConfig(): RelayerConfig {
   // local devs don't have to think about them.
   const flyToken = process.env.FLY_API_TOKEN?.trim() || null;
   const flyApp = process.env.FLY_SANDBOX_APP?.trim() || null;
+  // GHB-72 ships the runner.mjs in v2; v1 only has the smoke-test
+  // entrypoint and would silently no-op against a real SANDBOX_SPEC.
   const flyImage =
     process.env.FLY_SANDBOX_IMAGE?.trim() ||
-    "registry.fly.io/ghbounty-sandbox:v1";
+    "registry.fly.io/ghbounty-sandbox:v2";
   const flyRegion = process.env.FLY_SANDBOX_REGION?.trim() || "iad";
   const flyTimeout = Number(process.env.FLY_SANDBOX_TIMEOUT_S ?? "300");
   const flyCpus = Number(process.env.FLY_SANDBOX_CPUS ?? "2");

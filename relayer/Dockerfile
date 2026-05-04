@@ -11,6 +11,15 @@
 
 FROM node:20-alpine AS base
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+# GHB-73: flyctl is a runtime dep of the sandbox executor. We shell out
+# to `flyctl logs` to fetch the runner.mjs result line because the Fly
+# logs HTTP endpoints don't accept org-deploy tokens (401) and the
+# Machines API doesn't expose stdout. flyctl reads FLY_API_TOKEN env at
+# runtime, so the relayer's existing config plumbing is enough — no
+# extra session setup needed.
+RUN apk add --no-cache curl bash ca-certificates \
+ && curl -fsSL https://fly.io/install.sh | FLYCTL_INSTALL=/usr/local sh \
+ && flyctl version
 WORKDIR /app
 
 # --- deps stage: install workspace dependencies (cached layer) ---
