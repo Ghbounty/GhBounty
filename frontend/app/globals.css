@@ -3472,4 +3472,129 @@ section { position: relative; padding: 120px 40px; }
   .genlayer-dim-delta { grid-column: 2; grid-row: 2; text-align: right; }
 }
 
+/* ============================================================
+   YC-pattern landing additions: HowItWorks tabs, PoweredBy
+   subgroups, Team section
+   ============================================================ */
 
+/* HowItWorks — tab toggle replacing dual-track layout */
+.how-tabs {
+  display: flex;
+  width: max-content;
+  align-items: center;
+  gap: 4px;
+  margin: 0 auto 36px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.how-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.how-tab:hover { color: var(--text); }
+.how-tab.active {
+  background: rgba(0, 229, 209, 0.12);
+  color: var(--accent);
+}
+.how-tab svg { opacity: 0.85; }
+
+/* PoweredBy — subsections inside merged section */
+.powered-group { margin-top: 48px; }
+.powered-group:first-of-type { margin-top: 8px; }
+.powered-label {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+/* Team section */
+#team .section-head { margin-bottom: 40px; }
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.founder-card {
+  display: flex;
+  gap: 20px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.founder-card:hover {
+  border-color: rgba(0, 229, 209, 0.35);
+  background: rgba(0, 229, 209, 0.025);
+}
+.founder-photo {
+  width: 96px;
+  height: 96px;
+  border-radius: 14px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: #0a0a0a;
+}
+.founder-meta { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.founder-meta h4 { margin: 0; font-size: 17px; font-weight: 600; }
+.founder-role {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.founder-meta p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+.founder-links {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.founder-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.founder-links a:hover {
+  color: var(--accent);
+  border-color: rgba(0, 229, 209, 0.45);
+  background: rgba(0, 229, 209, 0.06);
+}
+
+@media (max-width: 760px) {
+  .team-grid { grid-template-columns: 1fr; }
+  .founder-card { gap: 16px; padding: 20px; }
+  .founder-photo { width: 72px; height: 72px; }
+  .how-tab { padding: 9px 14px; font-size: 12.5px; }
+}

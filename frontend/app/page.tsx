@@ -80,8 +80,8 @@ function Nav() {
         <a href="#problem">Problem</a>
         <a href="#solution">Solution</a>
         <a href="#how">How it works</a>
-        <a href="#validators">Validators</a>
-        <a href="#partners">Partners</a>
+        <a href="#powered-by">Powered by</a>
+        <a href="#team">Team</a>
       </div>
       <a href="/app" className="nav-cta">
         Launch App <IconArrow size={14} />
@@ -416,6 +416,8 @@ function Pipeline() {
 
 /* ---------------- How it works ---------------- */
 function HowItWorks() {
+  const [tab, setTab] = useState<"company" | "dev">("company");
+
   const companies = [
     {
       t: "Post an issue with a bounty",
@@ -452,6 +454,9 @@ function HowItWorks() {
       d: "Smart contract releases funds directly to your wallet — no waiting.",
     },
   ];
+
+  const steps = tab === "company" ? companies : devs;
+
   return (
     <section id="how">
       <div className="container">
@@ -462,50 +467,107 @@ function HowItWorks() {
             <span className="accent">from issue to payout.</span>
           </h2>
           <p>
-            Separate workflows for companies and developers — connected by GH
-            Bounty&apos;s AI layer and onchain escrow.
+            One unified flow — pick your side to see how GH Bounty&apos;s AI
+            layer and onchain escrow connect maintainers and contributors.
           </p>
         </div>
-        <div className="tracks">
-          <div className="track">
-            <div className="track-head">
-              <div className="ico">
-                <IconBuilding />
-              </div>
+
+        <div className="how-tabs" role="tablist" aria-label="How it works">
+          <button
+            role="tab"
+            aria-selected={tab === "company"}
+            className={`how-tab ${tab === "company" ? "active" : ""}`}
+            onClick={() => setTab("company")}
+            type="button"
+          >
+            <IconBuilding size={16} />
+            For companies
+          </button>
+          <button
+            role="tab"
+            aria-selected={tab === "dev"}
+            className={`how-tab ${tab === "dev" ? "active" : ""}`}
+            onClick={() => setTab("dev")}
+            type="button"
+          >
+            <IconDev size={16} />
+            For developers
+          </button>
+        </div>
+
+        <div className="track" key={tab}>
+          {steps.map((s, i) => (
+            <div className="track-step" key={i}>
+              <div className="num">{String(i + 1).padStart(2, "0")}</div>
               <div>
-                <div className="track-eyebrow">For companies</div>
-                <h3 style={{ marginBottom: 0 }}>Post &amp; fund bounties</h3>
+                <h4>{s.t}</h4>
+                <p>{s.d}</p>
               </div>
             </div>
-            <div style={{ height: 28 }} />
-            {companies.map((s, i) => (
-              <div className="track-step" key={i}>
-                <div className="num">{String(i + 1).padStart(2, "0")}</div>
-                <div>
-                  <h4>{s.t}</h4>
-                  <p>{s.d}</p>
-                </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ---------------- Powered by (validators + partners merged) ---------------- */
+function PoweredBy() {
+  const validators = [
+    { src: "/assets/openai.png", n: "OpenAI", s: "Frontier closed models" },
+    { src: "/assets/ollama.png", n: "Ollama", s: "Self-hosted open weights" },
+    { src: "/assets/heurist.png", n: "Heurist", s: "Open-source LLM gateway" },
+  ];
+  const partners = [
+    { src: "/assets/genlayer.png", n: "GenLayer", s: "AI consensus layer", h: 28 },
+    { src: "/assets/github.png", n: "GitHub", s: "Source of truth", h: 28 },
+    { src: "/assets/crecimiento.svg", n: "Crecimiento", s: "Ecosystem partner", h: 24 },
+  ];
+  return (
+    <section
+      id="powered-by"
+      style={{
+        background:
+          "linear-gradient(180deg, transparent, rgba(0,229,209,0.02), transparent)",
+      }}
+    >
+      <div className="container">
+        <div className="section-head">
+          <div className="eyebrow">Powered by</div>
+          <h2>
+            Frontier infrastructure{" "}
+            <span className="accent">for trustless dev work.</span>
+          </h2>
+          <p>
+            AI validator nodes run on multiple LLM stacks and reach consensus
+            via GenLayer&apos;s Optimistic Democracy. Every step is verifiable,
+            no single point of failure, no human gatekeeper.
+          </p>
+        </div>
+
+        <div className="powered-group">
+          <div className="powered-label">AI validators</div>
+          <div className="validators">
+            {validators.map((v, i) => (
+              <div className="validator" key={i}>
+                <img src={v.src} alt={v.n} />
+                <h4>{v.n}</h4>
+                <span>{v.s}</span>
               </div>
             ))}
           </div>
-          <div className="track">
-            <div className="track-head">
-              <div className="ico">
-                <IconDev />
-              </div>
-              <div>
-                <div className="track-eyebrow">For developers</div>
-                <h3 style={{ marginBottom: 0 }}>Contribute &amp; earn</h3>
-              </div>
-            </div>
-            <div style={{ height: 28 }} />
-            {devs.map((s, i) => (
-              <div className="track-step" key={i}>
-                <div className="num">{String(i + 1).padStart(2, "0")}</div>
-                <div>
-                  <h4>{s.t}</h4>
-                  <p>{s.d}</p>
+        </div>
+
+        <div className="powered-group">
+          <div className="powered-label">Partners</div>
+          <div className="partners-row">
+            {partners.map((p, i) => (
+              <div className="partner" key={i}>
+                <div className="partner-logo" style={{ height: 34 }}>
+                  <img src={p.src} alt={p.n} style={{ height: p.h }} />
                 </div>
+                <h4>{p.n}</h4>
+                <span>{p.s}</span>
               </div>
             ))}
           </div>
@@ -515,41 +577,79 @@ function HowItWorks() {
   );
 }
 
-/* ---------------- Validators ---------------- */
-function Validators() {
-  const list = [
-    { src: "/assets/openai.png", n: "OpenAI", s: "Frontier closed models" },
-    { src: "/assets/ollama.png", n: "Ollama", s: "Self-hosted open weights" },
-    { src: "/assets/heurist.png", n: "Heurist", s: "Open-source LLM gateway" },
+/* ---------------- Team ---------------- */
+function Team() {
+  const founders = [
+    {
+      photo: "/landing/founders/arturo.jpg",
+      name: "Arturo Grande",
+      role: "Product & Marketing",
+      bio: "Product and Marketing for web3 startups since 2022. Scaled a fintech from $5M to $65M USD processed in 3 years.",
+      links: [
+        { kind: "linkedin", href: "https://www.linkedin.com/in/arturo-grande" },
+        { kind: "x", href: "https://x.com/ArtuGrande" },
+      ],
+    },
+    {
+      photo: "/landing/founders/tomi.jpg",
+      name: "Tomas Mazzitello",
+      role: "DeFi Engineering",
+      bio: "DeFi engineer since 2022. Shipped for Near, Solv, Linera and Midas. ~80% hackathon win rate.",
+      links: [
+        { kind: "linkedin", href: "https://www.linkedin.com/in/tomasmazzi/" },
+      ],
+    },
   ];
+
+  const LinkedInIcon = (p: SVGProps<SVGSVGElement>) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" {...p}>
+      <path d="M20.45 20.45h-3.55v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.13 1.45-2.13 2.94v5.67H9.36V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.38-1.85 3.61 0 4.28 2.38 4.28 5.47v6.27zM5.34 7.43a2.06 2.06 0 110-4.12 2.06 2.06 0 010 4.12zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.72V1.72C24 .77 23.2 0 22.22 0z" />
+    </svg>
+  );
+  const XIcon = (p: SVGProps<SVGSVGElement>) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" {...p}>
+      <path d="M18.244 2H21.5l-7.44 8.506L23 22h-6.86l-5.37-7.02L4.6 22H1.34l7.96-9.1L1 2h7.035l4.86 6.43L18.244 2zm-1.2 18h1.88L7.05 4H5.07l11.974 16z" />
+    </svg>
+  );
+  const iconFor = (kind: string) =>
+    kind === "linkedin" ? <LinkedInIcon /> : <XIcon />;
+
   return (
-    <section
-      id="validators"
-      style={{
-        background:
-          "linear-gradient(180deg, transparent, rgba(0,229,209,0.02), transparent)",
-      }}
-    >
+    <section id="team">
       <div className="container">
         <div className="section-head">
-          <div className="eyebrow">AI validators</div>
+          <div className="eyebrow">Team</div>
           <h2>
-            Powered by{" "}
-            <span className="accent">GenLayer&apos;s validator network.</span>
+            Built by founders who&apos;ve{" "}
+            <span className="accent">shipped real things.</span>
           </h2>
           <p>
-            Every PR is independently evaluated by validator nodes running
-            frontier LLMs. Funds release the moment they reach Optimistic
-            Democracy consensus — no single point of failure, no human
-            gatekeeper.
+            Two operators with complementary scars — DeFi engineering on one
+            side, product and growth on the other.
           </p>
         </div>
-        <div className="validators">
-          {list.map((v, i) => (
-            <div className="validator" key={i}>
-              <img src={v.src} alt={v.n} />
-              <h4>{v.n}</h4>
-              <span>{v.s}</span>
+        <div className="team-grid">
+          {founders.map((f) => (
+            <div className="founder-card" key={f.name}>
+              <img className="founder-photo" src={f.photo} alt={f.name} />
+              <div className="founder-meta">
+                <h4>{f.name}</h4>
+                <div className="founder-role">{f.role}</div>
+                <p>{f.bio}</p>
+                <div className="founder-links">
+                  {f.links.map((l) => (
+                    <a
+                      key={l.kind}
+                      href={l.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${f.name} on ${l.kind}`}
+                    >
+                      {iconFor(l.kind)}
+                    </a>
+                  ))}
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -627,62 +727,6 @@ function LiveBounties() {
   );
 }
 
-/* ---------------- Partners ---------------- */
-function Partners() {
-  return (
-    <section id="partners">
-      <div className="container">
-        <div className="section-head">
-          <div className="eyebrow">Our partners</div>
-          <h2>
-            Backed by builders who{" "}
-            <span className="accent">push the ecosystem forward.</span>
-          </h2>
-          <p>
-            Powered by best-in-class infrastructure and supported by the
-            networks shaping the future of onchain dev work.
-          </p>
-        </div>
-        <div className="partners-row">
-          <div className="partner">
-            <div className="partner-logo" style={{ height: 34 }}>
-              <img
-                src="/assets/genlayer.png"
-                alt="GenLayer"
-                style={{ height: 28 }}
-              />
-            </div>
-            <h4>GenLayer</h4>
-            <span>AI consensus layer</span>
-          </div>
-          <div className="partner">
-            <div className="partner-logo" style={{ height: 34 }}>
-              <img
-                src="/assets/github.png"
-                alt="GitHub"
-                style={{ height: 28 }}
-              />
-            </div>
-            <h4>GitHub</h4>
-            <span>Source of truth</span>
-          </div>
-          <div className="partner">
-            <div className="partner-logo" style={{ height: 34 }}>
-              <img
-                src="/assets/crecimiento.svg"
-                alt="Crecimiento"
-                style={{ height: 24 }}
-              />
-            </div>
-            <h4>Crecimiento</h4>
-            <span>Ecosystem partner</span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 /* ---------------- FAQ ---------------- */
 const FAQS = [
   {
@@ -690,16 +734,8 @@ const FAQS = [
     a: "A network of AI validator nodes running frontier LLMs (OpenAI, open-weight models via Ollama, Heurist). Each node reviews the PR independently; consensus is reached via Optimistic Democracy.",
   },
   {
-    q: "What happens if validators disagree?",
-    a: "If consensus is not reached on the first pass, the PR enters a challenge window where additional validators are called in. If disagreement persists, the bounty reverts to human arbitration with full evaluation logs available onchain.",
-  },
-  {
     q: "Which chains and tokens are supported?",
     a: "We support USDC settlements on mainnet today, with multi-chain deployments on the near-term roadmap.",
-  },
-  {
-    q: "Do I need to write smart contracts to post a bounty?",
-    a: "No. Maintainers use our web app or CLI — the escrow contract is deployed for you in a single click, pre-audited and tied to your GitHub issue.",
   },
   {
     q: "How much does GH Bounty cost?",
@@ -748,20 +784,19 @@ function FinalCTA() {
     <section className="cta-section">
       <div className="cta-box">
         <h2>
-          Join <span style={{ color: "var(--accent)" }}>GH Bounty</span>
+          Start shipping bounties{" "}
+          <span style={{ color: "var(--accent)" }}>in minutes.</span>
         </h2>
         <p>
           Post bounties, earn rewards, and let AI handle the verification. No
           gatekeepers. No waiting.
         </p>
         <div className="hero-ctas">
-          <a className="btn btn-primary" href="/app/auth/signup/company">
-            <IconBuilding size={16} />
-            Join as a Company
-          </a>
-          <a className="btn btn-ghost" href="/app/auth/signup/dev">
-            <IconDev size={16} />
-            Join as a Dev
+          <a className="btn btn-primary" href="/app">
+            Launch App{" "}
+            <span className="arrow-wiggle">
+              <IconArrow size={16} />
+            </span>
           </a>
         </div>
       </div>
@@ -808,9 +843,9 @@ export default function Home() {
       <Problem />
       <Solution />
       <HowItWorks />
-      <Validators />
       <LiveBounties />
-      <Partners />
+      <PoweredBy />
+      <Team />
       <FAQ />
       <FinalCTA />
       <Footer />
