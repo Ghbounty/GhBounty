@@ -26,7 +26,11 @@ export const metadata: Metadata = {
   title: "GH Bounty — Open source bounties, paid in minutes.",
   description:
     "AI agents verify GitHub contributions and release payments instantly through onchain escrow.",
-  icons: { icon: "/assets/ghbounty-logo.svg" },
+  icons: {
+    icon: [{ url: "/favicongh.png", type: "image/png", sizes: "any" }],
+    shortcut: "/favicongh.png",
+    apple: "/favicongh.png",
+  },
 };
 
 export default function RootLayout({
