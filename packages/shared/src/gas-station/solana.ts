@@ -28,7 +28,12 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { Keypair, VersionedTransaction } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  VersionedTransaction,
+  type Commitment,
+} from "@solana/web3.js";
 
 import type { ChainId } from "../chains.js";
 import {
@@ -199,6 +204,59 @@ function defaultLog(entry: SponsorLogEntry): void {
   // any consumer.
   // eslint-disable-next-line no-console
   console.log(`[gas-station] ${JSON.stringify(entry)}`);
+}
+
+/**
+ * Build a `SolanaRpcSubmitter` backed by a real `Connection`. Used by:
+ *   - The Next.js api route (GHB-175) at module-init time.
+ *   - The devnet smoke script in `packages/shared/scripts/`.
+ *
+ * Two-pronged confirmation timeout: web3.js' built-in
+ * expiry-by-blockheight, raced with a setTimeout to cap wall-clock
+ * waits when the RPC stalls (the built-in can hang past `timeoutMs`
+ * if blocks keep arriving but the leader doesn't include the tx).
+ *
+ * `commitment` defaults to `confirmed` — safe latency/finality
+ * trade-off for sponsor flows. Pass `finalized` if you ever need
+ * stronger guarantees (will roughly double the wall-clock cost).
+ */
+export function makeConnectionRpcSubmitter(
+  connection: Connection,
+  commitment: Commitment = "confirmed",
+): SolanaRpcSubmitter {
+  return {
+    async send(rawTx) {
+      return connection.sendRawTransaction(rawTx, {
+        skipPreflight: false,
+        preflightCommitment: commitment,
+      });
+    },
+    async confirm(signature, timeoutMs) {
+      const latest = await connection.getLatestBlockhash(commitment);
+      const result = await Promise.race([
+        connection.confirmTransaction(
+          {
+            signature,
+            blockhash: latest.blockhash,
+            lastValidBlockHeight: latest.lastValidBlockHeight,
+          },
+          commitment,
+        ),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () =>
+              reject(new Error(`confirmation timeout after ${timeoutMs}ms`)),
+            timeoutMs,
+          ),
+        ),
+      ]);
+      if (result.value.err) {
+        throw new Error(
+          `tx errored on-chain: ${JSON.stringify(result.value.err)}`,
+        );
+      }
+    },
+  };
 }
 
 /**

@@ -40,58 +40,13 @@ import {
 import {
   ESCROW_PROGRAM_ID,
   loadGasStationKeypair,
+  makeConnectionRpcSubmitter,
   SolanaGasStation,
-  type SolanaRpcSubmitter,
 } from "../src/gas-station/index.js";
 
 const RPC_URL = process.env.RPC_URL || "https://api.devnet.solana.com";
 const COMMITMENT = "confirmed" as const;
 const MIN_BALANCE_LAMPORTS = 5_000_000; // ~0.005 SOL — covers fee + rent + amount
-
-/**
- * Wrap a real `Connection` to satisfy `SolanaRpcSubmitter`. This is the
- * same shape GHB-175's api route will build at boot — the smoke verifies
- * it works against a real RPC before we ship it to a route handler.
- */
-function makeRpcAdapter(connection: Connection): SolanaRpcSubmitter {
-  return {
-    async send(rawTx) {
-      // skipPreflight=false catches account-constraint failures before
-      // we burn confirmation latency. Production should keep this on too.
-      return connection.sendRawTransaction(rawTx, {
-        skipPreflight: false,
-        preflightCommitment: COMMITMENT,
-      });
-    },
-    async confirm(signature, timeoutMs) {
-      const latest = await connection.getLatestBlockhash(COMMITMENT);
-      // Two-pronged timeout: web3.js' confirmTransaction has its own
-      // expiry-by-blockheight, but it can hang past `timeoutMs` if the
-      // RPC stalls — race a setTimeout to cap the wall-clock wait.
-      const result = await Promise.race([
-        connection.confirmTransaction(
-          {
-            signature,
-            blockhash: latest.blockhash,
-            lastValidBlockHeight: latest.lastValidBlockHeight,
-          },
-          COMMITMENT,
-        ),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`confirmation timeout after ${timeoutMs}ms`)),
-            timeoutMs,
-          ),
-        ),
-      ]);
-      if (result.value.err) {
-        throw new Error(
-          `tx errored on-chain: ${JSON.stringify(result.value.err)}`,
-        );
-      }
-    },
-  };
-}
 
 /**
  * Borsh-encode the create_bounty args. We do this by hand to avoid
@@ -184,7 +139,7 @@ async function main(): Promise<void> {
   const station = new SolanaGasStation({
     chainId: "solana-devnet",
     keypair: gasStation,
-    rpc: makeRpcAdapter(connection),
+    rpc: makeConnectionRpcSubmitter(connection, COMMITMENT),
   });
 
   console.log(`\nsponsoring tx through SolanaGasStation...`);

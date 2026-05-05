@@ -60,6 +60,7 @@ export { GasStationError } from "./types.js";
 export {
   SolanaGasStation,
   loadGasStationKeypair,
+  makeConnectionRpcSubmitter,
 } from "./solana.js";
 export type {
   SolanaGasStationDeps,

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.30.1",
+    "@ghbounty/shared": "workspace:^",
     "@privy-io/react-auth": "^3.22.2",
     "@solana-program/memo": "^0.11.0",
     "@solana/kit": "^6.8.0",
