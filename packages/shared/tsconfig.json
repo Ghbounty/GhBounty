@@ -2,8 +2,19 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": ".",
+    "types": ["node"],
+    // GHB-180 — switch from base's NodeNext to bundler so Next.js
+    // (Turbopack) can consume this package without choking on the
+    // explicit `.js` extensions NodeNext required. Vitest, tsx, and
+    // tsc all handle bundler-mode the same way internally; the
+    // workspace package isn't published, so we don't need strict
+    // Node ESM semantics. Keeps imports as bare relative paths
+    // (`./chains` instead of `./chains.js`) so a single source tree
+    // works for every consumer.
+    "module": "ESNext",
+    "moduleResolution": "bundler"
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*"],
   "exclude": ["node_modules", "dist"]
 }

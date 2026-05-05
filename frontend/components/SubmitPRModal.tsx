@@ -31,8 +31,10 @@ import {
 } from "@solana/web3.js";
 import {
   useSignAndSendTransaction,
+  useSignTransaction,
   useWallets,
 } from "@privy-io/react-auth/solana";
+import { usePrivy } from "@privy-io/react-auth";
 import { ProcessingSteps } from "./ProcessingSteps";
 import { StatusBadge } from "./StatusBadge";
 import { parsePrUrl } from "@/lib/github";
@@ -41,6 +43,11 @@ import { insertSubmissionAndMeta } from "@/lib/submissions";
 import { hasDevSubmitted } from "@/lib/data";
 import { createClient } from "@/utils/supabase/client";
 import { useAuth, usePrivyBackend } from "@/lib/auth-context";
+import {
+  formatGasStationError,
+  GAS_STATION_ENABLED,
+  submitSponsored,
+} from "@/lib/gas-station-client";
 import type { Bounty } from "@/lib/types";
 
 type Props = {
@@ -90,6 +97,10 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
   const { user } = useAuth();
   const { wallets, ready: walletsReady } = useWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
+  // GHB-176: gas-station path uses partial-sign (server fills fee_payer).
+  // Both hooks always called — React forbids conditional hook usage.
+  const { signTransaction } = useSignTransaction();
+  const privy = usePrivy();
 
   // Single-wallet UX matches the company side. If the dev linked an external
   // wallet on top of the embedded one, we just take the first.
@@ -190,46 +201,64 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
         connection,
       );
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
-        "confirmed",
-      );
-      const tx = new Transaction({
-        feePayer: solver,
-        recentBlockhash: blockhash,
-      }).add(ix);
-      const serialized = tx.serialize({ requireAllSignatures: false });
-
-      // PHASE_SIGN: hand off to Privy — pops the wallet UI. This is the
-      // step that takes the longest in practice (waiting on the user).
+      // PHASE_SIGN: hand off to Privy. GHB-176 introduces two paths:
+      //   1. Gas-station: user partial-signs only their slot; server
+      //      fills fee_payer + submits + confirms. txHash returned.
+      //   2. Legacy: user pays the fee themselves (local dev fallback).
       setPhase(PHASE_SIGN);
-      const { signature } = await signAndSendTransaction({
-        transaction: serialized,
-        wallet,
-        chain: "solana:devnet",
-      });
-      const sig = bs58.encode(signature);
-      setTxSig(sig);
-      setSubmissionPda(pda.toBase58());
+      let sig: string;
+      if (GAS_STATION_ENABLED) {
+        const result = await submitSponsored({
+          ix,
+          wallet,
+          signTransaction,
+          getAccessToken: () => privy.getAccessToken(),
+          connection,
+          // GHB-180 — bundle a rent topup so a 0-SOL dev wallet can
+          // pay the Submission PDA's `init` rent. Real on-devnet
+          // rent measured at ~3.15M lamports (Submission has a
+          // larger layout than first estimated — pr_url + opus hash
+          // bumps it). 5M = comfortable buffer, well under the
+          // validator's 0.05 SOL cap.
+          topupLamports: 5_000_000,
+        });
+        sig = result.txHash;
+        setTxSig(sig);
+        setSubmissionPda(pda.toBase58());
+        // Server already confirmed — advance through CONFIRM straight to INDEX.
+        setPhase(PHASE_CONFIRM);
+      } else {
+        const { blockhash, lastValidBlockHeight } =
+          await connection.getLatestBlockhash("confirmed");
+        const tx = new Transaction({
+          feePayer: solver,
+          recentBlockhash: blockhash,
+        }).add(ix);
+        const serialized = tx.serialize({ requireAllSignatures: false });
+        const { signature } = await signAndSendTransaction({
+          transaction: serialized,
+          wallet,
+          chain: "solana:devnet",
+        });
+        sig = bs58.encode(signature);
+        setTxSig(sig);
+        setSubmissionPda(pda.toBase58());
 
-      // PHASE_CONFIRM: wait for confirmation. `confirmed` is enough —
-      // `finalized` would add ~10s of UX wait for a marginal safety win
-      // on devnet. CRITICAL: `confirmTransaction` resolves even when the
-      // on-chain tx reverted (program error / constraint violation). The
-      // failure shows up in `value.err`, not as a thrown error — so we
-      // must check it explicitly. Without this guard, the modal pretends
-      // the tx succeeded and we surface a confusing DB error two steps
-      // later (typically the `submissions_pda_unique` 409 you'd hit on
-      // a duplicate submit_solution).
-      setPhase(PHASE_CONFIRM);
-      const confirmation = await connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight },
-        "confirmed",
-      );
-      if (confirmation.value.err) {
-        throw new Error(
-          `Submit reverted on-chain: ${JSON.stringify(confirmation.value.err)}. ` +
-            `The submission PDA likely already exists for this bounty (replay).`,
+        // PHASE_CONFIRM: wait for confirmation. `confirmed` is enough on
+        // devnet. CRITICAL: `confirmTransaction` resolves even when the
+        // on-chain tx reverted (program error / constraint violation).
+        // The failure shows up in `value.err`, not as a thrown error.
+        setPhase(PHASE_CONFIRM);
+        const confirmation = await connection.confirmTransaction(
+          { signature: sig, blockhash, lastValidBlockHeight },
+          "confirmed",
         );
+        if (confirmation.value.err) {
+          throw new Error(
+            `Submit reverted on-chain: ${JSON.stringify(confirmation.value.err)}. ` +
+              `The submission PDA likely already exists for this bounty (replay).`,
+          );
+        }
       }
 
       // PHASE_INDEX: persist the off-chain rows.
@@ -259,7 +288,9 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
       // Mark the currently-active step in red before flipping to the
       // error view so the user sees *which* phase failed.
       setPhaseError(true);
-      setError(err instanceof Error ? err.message : "Submission failed.");
+      // formatGasStationError falls through to err.message for non-gas-
+      // station errors — safe to call unconditionally.
+      setError(formatGasStationError(err));
       setStep("error");
       sentRef.current = false; // allow retry
     }

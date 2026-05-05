@@ -7,9 +7,18 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "smoke:gas-station": "tsx scripts/gas-station-smoke.ts",
+    "health:gas-station": "tsx scripts/gas-station-health.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0"
   },
   "devDependencies": {
-    "typescript": "^5.6.0"
+    "@types/node": "^20.16.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.9"
   }
 }
