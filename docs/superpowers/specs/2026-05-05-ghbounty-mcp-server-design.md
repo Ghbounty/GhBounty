@@ -26,7 +26,7 @@ After signup the agent can:
 |---|---|
 | **Scope of v1** | C — both sides (dev + company), full marketplace |
 | **Wallet custody** | B — BYO non-custodial. Agent generates & holds its own Solana keypair. MCP returns serialized unsigned txs; agent signs locally; MCP submits |
-| **Sybil defense** | E — refundable on-chain stake (0.005 SOL) **+** GitHub OAuth Device Flow obligatorio |
+| **Sybil defense** | E — refundable on-chain stake **denominated in USD (~$3)** + GitHub OAuth Device Flow obligatorio. MCP fetches live SOL/USD price at `create_account.poll` time to compute the exact lamport amount; program enforces a minimum floor (`MIN_STAKE_LAMPORTS = 100_000` = 0.0001 SOL absolute) so the floor degrades gracefully if SOL moves. _Why dynamic: at recent SOL ≈ $8000, hardcoding 0.005 SOL would cost ~$40 per signup and price out legitimate agents — kills "100% agentic" thesis. Target $3 keeps the cost real but accessible._ |
 | **Server architecture** | Y — `apps/mcp` standalone Next.js project on Vercel, deployed to `mcp.ghbounty.com` |
 | **Token** | Native SOL (matches current Anchor program). USDC migration deferred to GHB-144 — when it lands, MCP adapts the 4-5 instruction handlers; tool surface stays unchanged |
 | **GH OAuth flow** | Device Flow (`gh auth login`-style), not redirect-based. One-time HITL per agent account |
@@ -206,8 +206,13 @@ pub fn refund_stake_deposit(ctx: Context<RefundStakeDeposit>) -> Result<()> {
 }
 
 // New constants
-pub const MIN_STAKE_LAMPORTS: u64 = 5_000_000;       // 0.005 SOL
+pub const MIN_STAKE_LAMPORTS: u64 = 100_000;         // 0.0001 SOL absolute floor (~$0.80 at SOL ≈ $8000)
 pub const STAKE_LOCK_DAYS: i64 = 14;
+// Note: the *target* stake (~$3 USD) is computed by the MCP server at tx-build
+// time using a SOL/USD oracle (CoinGecko REST in v1, Pyth on-chain in v2).
+// The program only enforces the absolute floor — MCP demands the higher of
+// (MIN_STAKE_LAMPORTS, target_usd_lamports). This keeps the program oracle-free
+// while letting the economic incentive track USD over time.
 ```
 
 **Authority key**: same authority key already used elsewhere in the program (TBD — confirm during implementation by reading the existing `release_bounty` handler). Slashing/refund are privileged operations dispatched by the relayer.
@@ -280,11 +285,17 @@ Agent                          MCP server                       External
    )                                              ◄── { access_token } (when authorized)
                               GET /user → { login: "claudebot42" }
                               UPDATE agent_accounts (handle, status: pending_stake)
-                              BUILD unsigned tx: init_stake_deposit(0.005 SOL)
+                              FETCH SOL/USD price from CoinGecko REST
+                              COMPUTE target_lamports = max(MIN, $3_USD / sol_price)
+                              BUILD unsigned tx: init_stake_deposit(target_lamports)
                               GUARD against unique constraint on github_handle
                               INSERT pending_txs row (with message_hash)
    ◄── { status: "ready_to_stake",
-         github_handle, tx_to_sign_b64, stake_amount_sol: "0.005",
+         github_handle,
+         tx_to_sign_b64,
+         stake_amount_sol: "0.000375",     -- dynamic, e.g. at SOL ≈ $8000
+         stake_amount_usd: "3.00",         -- always ≈ $3
+         sol_price_used: "8000.00",        -- audit trail
          expected_signers, expected_program_id }
 
 5. Agent signs locally with @solana/kit
@@ -410,10 +421,10 @@ return getBase64EncodedWireTransaction(compileTransaction(message));
 ## 9. Sybil & abuse layers
 
 ### Layer 1 — Account creation cost
-- **0.005 SOL stake** refundable after 14 days with no active slashing events
+- **~$3 USD stake** denominated dynamically (lamports computed at `create_account.poll` time using CoinGecko SOL/USD price). Refundable after 14 days with no active slashing events. Floor: 0.0001 SOL (`MIN_STAKE_LAMPORTS` enforced by program).
 - **GitHub handle UNIQUE** — one GH account = one agent account
 - **Wallet pubkey UNIQUE** — one wallet = one agent account
-- **GH OAuth Device Flow** — agent must possess a real GitHub account (one-time HITL)
+- **GH OAuth Device Flow** — agent must possess a real GitHub account (one-time HITL). _This is the strongest layer — creating thousands of GH accounts that survive the `pr.author == github_handle` check is the main barrier to Sybil._
 
 ### Layer 2 — Proof-of-PR (anti-theft)
 - After `submissions.submit_signed` confirms on-chain, the watcher in the relayer fetches `gh api /repos/{owner}/{repo}/pulls/{n}` and verifies `pr.user.login == agent_accounts.github_handle`. Mismatch → submission marked `rejected_pr_theft`, slashing event added (severity 2).
@@ -593,14 +604,17 @@ This SDK keeps the public quickstart at ~10 lines.
 
 ## 13. Open questions / risks
 
-| Question | Owner | Resolution by |
-|---|---|---|
-| `AUTHORITY_PUBKEY` for slash/refund — same as existing release authority, or new dedicated key? | TBD | Phase 0 |
-| `@vercel/mcp-adapter` stability — currently in beta. Acceptable to depend on? | TBD | Phase 1 kickoff |
-| Gas-station availability (GHB-176/177 by Tomi) — what's the merge ETA? Block Phase 1 if not ready, or fallback to "agent must fund 0.01 SOL manually"? | Tomi | Phase 1 kickoff |
-| Vercel project for `ghbounty-mcp` — same team `weareghbounty-6269`, or isolated team for security? | Arturo | Phase 1 |
-| Upstash Redis vs Vercel KV for rate limiting — cost/latency comparison | TBD | Phase 1 |
-| What does the home page MCPSection mockup *visually* look like — visual companion needed? | Arturo | Phase 4 |
+| # | Question | Owner | Resolution by |
+|---|---|---|---|
+| 1 | `AUTHORITY_PUBKEY` for slash/refund — same as existing release authority, or new dedicated key? | TBD | Phase 0 |
+| 2 | `@vercel/mcp-adapter` stability — currently in beta. Acceptable to depend on? | TBD | Phase 1 kickoff |
+| 3 | Gas-station availability (GHB-176/177 by Tomi) — what's the merge ETA? Block Phase 1 if not ready, or fallback to "agent must fund $1 of SOL manually"? | Tomi | Phase 1 kickoff |
+| 4 | Vercel project for `ghbounty-mcp` — same team `weareghbounty-6269`, or isolated team for security? | Arturo | Phase 1 |
+| 5 | Upstash Redis vs Vercel KV for rate limiting — cost/latency comparison | TBD | Phase 1 |
+| 6 | What does the home page MCPSection mockup *visually* look like — visual companion needed? | Arturo | Phase 4 |
+| 7 | **Submission account rent** — `submit_solution` inits a Submission account with `payer = solver`, costing the agent ~0.002 SOL per PR. At SOL ≈ $8000, that's ~**$15 per submission** independent of bounty value. For a $50 bounty, a 30% overhead. **Three options to evaluate:** (a) shrink the Submission account to <80 bytes (~0.0006 SOL ≈ $5 — minor program rewrite); (b) bounty creator pre-funds a "submission slot pool" at bounty creation (escrow covers all submission rent, refunds unused at resolve); (c) Light Protocol ZK Compression (rent-free, more invasive program change). _Without one of these, BYO non-custodial breaks for low-value bounties._ | Tomi (program) + Arturo (product) | Before Phase 2 |
+| 8 | **SOL/USD oracle source for stake denomination** — CoinGecko REST (free, ~30s cached) is fine for v1 since stake is loose ($3 ± $0.30 doesn't matter). v2 might need Pyth on-chain if we want the program itself to enforce USD-denominated minimums. Pick provider + caching strategy. | TBD | Phase 0 |
+| 9 | **Stake price drift between `prepare` and `submit`** — if SOL pumps 50% in the 50s window between `create_account.poll` and `create_account.complete`, the lamport amount in the signed tx might no longer satisfy a re-fetched USD target. _Decision: lock the lamport amount at `poll` time (we already pin via `pending_txs.message_hash`), accept ±N% USD drift as cost of the protocol. Document in `/agents` page._ | Resolved (decision logged) | n/a |
 
 ## 14. Success criteria
 
