@@ -10,9 +10,9 @@ import {
   SolanaGasStation,
   type SolanaRpcSubmitter,
   type SponsorLogEntry,
-} from "../src/gas-station/solana.js";
-import { ESCROW_PROGRAM_ID } from "../src/gas-station/solana-validator.js";
-import { GasStationError } from "../src/gas-station/types.js";
+} from "../src/gas-station/solana";
+import { ESCROW_PROGRAM_ID } from "../src/gas-station/solana-validator";
+import { GasStationError } from "../src/gas-station/types";
 
 /**
  * GHB-174 — SolanaGasStation tests.

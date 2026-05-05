@@ -1,2 +1,2 @@
-export * from "./chains.js";
-export * from "./gas-station/index.js";
+export * from "./chains";
+export * from "./gas-station/index";

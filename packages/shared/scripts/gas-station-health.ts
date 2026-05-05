@@ -27,7 +27,7 @@
  */
 
 import { Connection, PublicKey } from "@solana/web3.js";
-import { loadGasStationKeypair } from "../src/gas-station/index.js";
+import { loadGasStationKeypair } from "../src/gas-station/index";
 
 interface Args {
   pubkey?: string;

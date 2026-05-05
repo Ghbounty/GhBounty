@@ -15,7 +15,7 @@ import {
   MAX_FEE_LAMPORTS,
   MAX_TOPUP_LAMPORTS,
   validateSolanaSponsorTx,
-} from "../src/gas-station/solana-validator.js";
+} from "../src/gas-station/solana-validator";
 
 /**
  * GHB-173 — validator unit tests.

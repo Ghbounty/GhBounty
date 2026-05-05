@@ -18,7 +18,7 @@
  *   - GHB-178 (deferred) — EvmGasStation via ERC-4337 paymaster
  */
 
-import type { ChainId } from "../chains.js";
+import type { ChainId } from "../chains";
 
 /**
  * Solana sponsor payload. The user partial-signs a VersionedTransaction

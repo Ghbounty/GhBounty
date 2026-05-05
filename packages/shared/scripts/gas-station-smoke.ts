@@ -45,7 +45,7 @@ import {
   loadGasStationKeypair,
   makeConnectionRpcSubmitter,
   SolanaGasStation,
-} from "../src/gas-station/index.js";
+} from "../src/gas-station/index";
 
 const RPC_URL = process.env.RPC_URL || "https://api.devnet.solana.com";
 const COMMITMENT = "confirmed" as const;

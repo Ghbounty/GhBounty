@@ -35,14 +35,14 @@ import {
   type Commitment,
 } from "@solana/web3.js";
 
-import type { ChainId } from "../chains.js";
+import type { ChainId } from "../chains";
 import {
   GasStation,
   GasStationError,
   SponsorRequest,
   SponsorResult,
-} from "./types.js";
-import { validateSolanaSponsorTx } from "./solana-validator.js";
+} from "./types";
+import { validateSolanaSponsorTx } from "./solana-validator";
 
 /**
  * Minimal RPC surface SolanaGasStation needs. A real `Connection`
