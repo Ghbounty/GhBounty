@@ -451,10 +451,10 @@ describe("handleSponsorRequest — 500 errors", () => {
     );
 
     expect(res.status).toBe(500);
-    // Generic body — we don't leak RPC details to the client.
     expect(res.body.error).toBe("gas station error");
-    expect(res.body.reason).toBeUndefined();
-    // But the log carries the detail for ops.
+    // rpc_error reason is forwarded (on-chain errors are public anyway,
+    // and the cancel flow uses it to detect "already settled" reverts).
+    expect(res.body.reason).toContain("connection refused");
     expect(logs[0]?.outcome).toBe("rpc_error");
     expect(logs[0]?.reason).toContain("connection refused");
   });

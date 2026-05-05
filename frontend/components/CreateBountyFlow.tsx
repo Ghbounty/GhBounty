@@ -29,8 +29,10 @@ import {
 } from "@solana/web3.js";
 import {
   useSignAndSendTransaction,
+  useSignTransaction,
   useWallets,
 } from "@privy-io/react-auth/solana";
+import { usePrivy } from "@privy-io/react-auth";
 import { ProcessingSteps } from "./ProcessingSteps";
 import {
   DEFAULT_SCORER,
@@ -40,6 +42,11 @@ import {
 import { insertIssueAndMeta } from "@/lib/bounties";
 import { createClient } from "@/utils/supabase/client";
 import { useAuth, usePrivyBackend } from "@/lib/auth-context";
+import {
+  formatGasStationError,
+  GAS_STATION_ENABLED,
+  submitSponsored,
+} from "@/lib/gas-station-client";
 import type { Bounty, Company, ReleaseMode } from "@/lib/types";
 
 export type CreateBountyData = {
@@ -101,6 +108,13 @@ export function CreateBountyFlow({
   const { user } = useAuth();
   const { wallets, ready: walletsReady } = useWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
+  // GHB-176: gas-station path needs partial-signing (server fills the
+  // fee-payer slot). `useSignTransaction` doesn't broadcast, unlike its
+  // sibling `useSignAndSendTransaction`. Both hooks are imported so the
+  // component can branch on `GAS_STATION_ENABLED` without conditional
+  // hook calls (which React forbids).
+  const { signTransaction } = useSignTransaction();
+  const privy = usePrivy();
 
   // Pick the user's primary Solana wallet. Privy returns embedded + linked
   // external wallets in `wallets`; for now we just take the first — the
@@ -163,46 +177,61 @@ export function CreateBountyFlow({
         connection,
       );
 
-      // Wrap in a Transaction with a fresh blockhash. Privy's
-      // `signAndSendTransaction` wants the serialized wire format
-      // *before* signing — `requireAllSignatures: false` lets us
-      // serialize an unsigned tx (Privy's wallet adds the signature).
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
-        "confirmed",
-      );
-      const tx = new Transaction({
-        feePayer: creator,
-        recentBlockhash: blockhash,
-      }).add(ix);
-      const serialized = tx.serialize({ requireAllSignatures: false });
-
-      // PHASE_SIGN: pops Privy's wallet UI. This is the longest step in
-      // practice (waiting on the user to confirm).
+      // PHASE_SIGN: pops Privy's wallet UI. The longest step in practice
+      // (waiting on the user). GHB-176 introduces two paths here:
+      //   1. Gas-station (sponsored): the user partial-signs only their
+      //      slot; the server signs as fee_payer + submits + confirms.
+      //      Returns a txHash directly. The user's wallet needs zero SOL.
+      //   2. Legacy (direct): the user pays the fee themselves. Used in
+      //      local dev when NEXT_PUBLIC_GAS_STATION_PUBKEY is unset.
       setPhase(PHASE_SIGN);
-      const { signature } = await signAndSendTransaction({
-        transaction: serialized,
-        wallet,
-        chain: "solana:devnet",
-      });
-      const sig = bs58.encode(signature);
-      setTxSig(sig);
-      setBountyPda(pda.toBase58());
+      let sig: string;
+      if (GAS_STATION_ENABLED) {
+        const result = await submitSponsored({
+          ix,
+          wallet,
+          signTransaction,
+          getAccessToken: () => privy.getAccessToken(),
+          connection,
+        });
+        sig = result.txHash;
+        setTxSig(sig);
+        setBountyPda(pda.toBase58());
+        // The server already confirmed the tx (skipPreflight=false +
+        // confirmTransaction). No client-side re-confirm needed —
+        // advance the cursor straight through CONFIRM into INDEX.
+        setPhase(PHASE_CONFIRM);
+      } else {
+        const { blockhash, lastValidBlockHeight } =
+          await connection.getLatestBlockhash("confirmed");
+        const tx = new Transaction({
+          feePayer: creator,
+          recentBlockhash: blockhash,
+        }).add(ix);
+        const serialized = tx.serialize({ requireAllSignatures: false });
+        const { signature } = await signAndSendTransaction({
+          transaction: serialized,
+          wallet,
+          chain: "solana:devnet",
+        });
+        sig = bs58.encode(signature);
+        setTxSig(sig);
+        setBountyPda(pda.toBase58());
 
-      // PHASE_CONFIRM: wait for the cluster. `confirmed` is enough on
-      // devnet — `finalized` would be safer but adds ~10s of UX wait.
-      // CRITICAL: `confirmTransaction` resolves even when the tx reverted
-      // (program error). The failure is in `value.err`, not thrown. Check
-      // it explicitly so the modal stops at this step instead of pinning
-      // the failure on the DB insert with a confusing message.
-      setPhase(PHASE_CONFIRM);
-      const confirmation = await connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight },
-        "confirmed",
-      );
-      if (confirmation.value.err) {
-        throw new Error(
-          `Bounty creation reverted on-chain: ${JSON.stringify(confirmation.value.err)}.`,
+        // PHASE_CONFIRM: wait for the cluster. `confirmed` is enough on
+        // devnet — `finalized` would be safer but adds ~10s of UX wait.
+        // CRITICAL: `confirmTransaction` resolves even when the tx reverted
+        // (program error). The failure is in `value.err`, not thrown.
+        setPhase(PHASE_CONFIRM);
+        const confirmation = await connection.confirmTransaction(
+          { signature: sig, blockhash, lastValidBlockHeight },
+          "confirmed",
         );
+        if (confirmation.value.err) {
+          throw new Error(
+            `Bounty creation reverted on-chain: ${JSON.stringify(confirmation.value.err)}.`,
+          );
+        }
       }
 
       // PHASE_INDEX: persist the off-chain rows.
@@ -255,7 +284,9 @@ export function CreateBountyFlow({
     } catch (err) {
       console.error("[CreateBountyFlow] failed:", err);
       setPhaseError(true);
-      setError(err instanceof Error ? err.message : "Bounty creation failed.");
+      // `formatGasStationError` falls through to err.message for
+      // non-gas-station errors, so it's safe to call unconditionally.
+      setError(formatGasStationError(err));
       setStep("error");
       sentRef.current = false; // allow retry
     }

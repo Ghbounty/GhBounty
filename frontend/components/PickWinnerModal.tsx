@@ -26,13 +26,20 @@ import { createPortal } from "react-dom";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   useSignAndSendTransaction,
+  useSignTransaction,
   useWallets,
 } from "@privy-io/react-auth/solana";
+import { usePrivy } from "@privy-io/react-auth";
 import { Avatar } from "./Avatar";
 import { ProcessingSteps } from "./ProcessingSteps";
 import { buildResolveBountyIx, getConnection } from "@/lib/solana";
 import { recordWinnerOnchain } from "@/lib/review-actions";
 import { createClient } from "@/utils/supabase/client";
+import {
+  formatGasStationError,
+  GAS_STATION_ENABLED,
+  submitSponsored,
+} from "@/lib/gas-station-client";
 import type { Bounty } from "@/lib/types";
 import type { EnrichedSubmission } from "@/lib/data";
 
@@ -92,6 +99,10 @@ export function PickWinnerModal({
 
   const { wallets, ready: walletsReady } = useWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
+  // GHB-176: gas-station path uses partial-sign. Both hooks always
+  // mounted — React forbids conditional hook usage.
+  const { signTransaction } = useSignTransaction();
+  const privy = usePrivy();
   const wallet = wallets[0];
   const walletAddress = wallet?.address ?? null;
 
@@ -141,37 +152,49 @@ export function PickWinnerModal({
         connection,
       );
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
-        "confirmed",
-      );
-      const tx = new Transaction({
-        feePayer: creator,
-        recentBlockhash: blockhash,
-      }).add(ix);
-      const serialized = tx.serialize({ requireAllSignatures: false });
-
-      // PHASE_SIGN — pops Privy's wallet UI.
+      // PHASE_SIGN — gas-station vs legacy split (GHB-176).
       setPhase(PHASE_SIGN);
-      const { signature } = await signAndSendTransaction({
-        transaction: serialized,
-        wallet,
-        chain: "solana:devnet",
-      });
-      const sig = bs58.encode(signature);
-      setTxSig(sig);
+      let sig: string;
+      if (GAS_STATION_ENABLED) {
+        const result = await submitSponsored({
+          ix,
+          wallet,
+          signTransaction,
+          getAccessToken: () => privy.getAccessToken(),
+          connection,
+        });
+        sig = result.txHash;
+        setTxSig(sig);
+        // Server already confirmed — advance through CONFIRM into INDEX.
+        setPhase(PHASE_CONFIRM);
+      } else {
+        const { blockhash, lastValidBlockHeight } =
+          await connection.getLatestBlockhash("confirmed");
+        const tx = new Transaction({
+          feePayer: creator,
+          recentBlockhash: blockhash,
+        }).add(ix);
+        const serialized = tx.serialize({ requireAllSignatures: false });
+        const { signature } = await signAndSendTransaction({
+          transaction: serialized,
+          wallet,
+          chain: "solana:devnet",
+        });
+        sig = bs58.encode(signature);
+        setTxSig(sig);
 
-      // PHASE_CONFIRM — confirmTransaction resolves on revert without
-      // throwing, so we MUST inspect `value.err` ourselves. Same gotcha
-      // as in SubmitPRModal.
-      setPhase(PHASE_CONFIRM);
-      const confirmation = await connection.confirmTransaction(
-        { signature: sig, blockhash, lastValidBlockHeight },
-        "confirmed",
-      );
-      if (confirmation.value.err) {
-        throw new Error(
-          `Resolve reverted on-chain: ${JSON.stringify(confirmation.value.err)}.`,
+        // PHASE_CONFIRM — confirmTransaction resolves on revert without
+        // throwing, so we MUST inspect `value.err` ourselves.
+        setPhase(PHASE_CONFIRM);
+        const confirmation = await connection.confirmTransaction(
+          { signature: sig, blockhash, lastValidBlockHeight },
+          "confirmed",
         );
+        if (confirmation.value.err) {
+          throw new Error(
+            `Resolve reverted on-chain: ${JSON.stringify(confirmation.value.err)}.`,
+          );
+        }
       }
 
       // PHASE_INDEX — best-effort DB mirror. Failures are logged, not
@@ -205,7 +228,7 @@ export function PickWinnerModal({
     } catch (err) {
       console.error("[PickWinnerModal] failed:", err);
       setPhaseError(true);
-      setError(err instanceof Error ? err.message : "Resolve failed.");
+      setError(formatGasStationError(err));
       setStep("error");
       sentRef.current = false; // allow retry
     }

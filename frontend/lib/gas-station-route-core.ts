@@ -297,12 +297,22 @@ export async function handleSponsorRequest(
         durationMs: Date.now() - start,
       });
       // For validator_rejected we surface the reason — the frontend
-      // shows it to the user so they can fix their tx. For everything
-      // else we keep the response generic to avoid leaking internals.
+      // shows it to the user so they can fix their tx.
       if (err.code === "validator_rejected") {
         return {
           status,
           body: { error: "tx rejected by gas station", reason: err.message },
+        };
+      }
+      // For rpc_error we ALSO surface the reason — the message is built
+      // from `connection.confirmTransaction`'s `value.err` payload, which
+      // is on-chain and public anyway. The frontend cancel flow uses it
+      // to detect "already settled" reverts (BountyNotOpen / etc.) and
+      // skip the redundant on-chain attempt.
+      if (err.code === "rpc_error") {
+        return {
+          status,
+          body: { error: "gas station error", reason: err.message },
         };
       }
       return { status, body: { error: "gas station error" } };

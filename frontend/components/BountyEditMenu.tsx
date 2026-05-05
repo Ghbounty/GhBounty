@@ -12,8 +12,10 @@ import bs58 from "bs58";
 import { PublicKey, Transaction } from "@solana/web3.js";
 import {
   useSignAndSendTransaction,
+  useSignTransaction,
   useWallets,
 } from "@privy-io/react-auth/solana";
+import { usePrivy } from "@privy-io/react-auth";
 import {
   closeBounty as closeBountyMock,
   deleteBounty as deleteBountyMock,
@@ -23,6 +25,12 @@ import { usePrivyBackend } from "@/lib/auth-context";
 import { closeIssue, deleteIssueAndMeta } from "@/lib/bounties";
 import { buildCancelBountyIx, getConnection } from "@/lib/solana";
 import { createClient } from "@/utils/supabase/client";
+import {
+  formatGasStationError,
+  GAS_STATION_ENABLED,
+  GasStationClientError,
+  submitSponsored,
+} from "@/lib/gas-station-client";
 import type { Bounty, ReleaseMode } from "@/lib/types";
 import { ReleaseModePicker } from "./ReleaseModePicker";
 import { UsdcIcon } from "./UsdcIcon";
@@ -47,6 +55,9 @@ export function BountyEditMenu({
   const privyMode = usePrivyBackend;
   const { wallets } = useWallets();
   const { signAndSendTransaction } = useSignAndSendTransaction();
+  // GHB-176: gas-station partial-sign hook + access-token getter.
+  const { signTransaction } = useSignTransaction();
+  const privy = usePrivy();
 
   useEffect(() => {
     if (!open) return;
@@ -151,33 +162,49 @@ export function BountyEditMenu({
             { creator, bountyPda },
             connection,
           );
-          const { blockhash, lastValidBlockHeight } =
-            await connection.getLatestBlockhash("confirmed");
-          const tx = new Transaction({
-            feePayer: creator,
-            recentBlockhash: blockhash,
-          }).add(ix);
-          const serialized = tx.serialize({ requireAllSignatures: false });
 
-          const { signature } = await signAndSendTransaction({
-            transaction: serialized,
-            wallet,
-            chain: "solana:devnet",
-          });
-          const sig = bs58.encode(signature);
+          // GHB-176: gas-station vs legacy split. The "already-settled"
+          // detection further down looks at err.message, so the gas-station
+          // path needs to bubble up the validator's reason verbatim — which
+          // it already does (GasStationClientError carries `reason`).
+          if (GAS_STATION_ENABLED) {
+            await submitSponsored({
+              ix,
+              wallet,
+              signTransaction,
+              getAccessToken: () => privy.getAccessToken(),
+              connection,
+            });
+            // Server already confirmed.
+          } else {
+            const { blockhash, lastValidBlockHeight } =
+              await connection.getLatestBlockhash("confirmed");
+            const tx = new Transaction({
+              feePayer: creator,
+              recentBlockhash: blockhash,
+            }).add(ix);
+            const serialized = tx.serialize({ requireAllSignatures: false });
 
-          // `confirmTransaction` resolves even on revert — the program error
-          // ends up in `value.err`. Mirror that into a thrown Error so the
-          // outer try/catch can decide whether it's a "no escrow left"
-          // case or a real failure.
-          const conf = await connection.confirmTransaction(
-            { signature: sig, blockhash, lastValidBlockHeight },
-            "confirmed",
-          );
-          if (conf.value.err) {
-            throw new Error(
-              `cancel_bounty reverted on-chain: ${JSON.stringify(conf.value.err)}`,
+            const { signature } = await signAndSendTransaction({
+              transaction: serialized,
+              wallet,
+              chain: "solana:devnet",
+            });
+            const sig = bs58.encode(signature);
+
+            // `confirmTransaction` resolves even on revert — the program
+            // error ends up in `value.err`. Mirror that into a thrown
+            // Error so the outer try/catch can decide whether it's a "no
+            // escrow left" case or a real failure.
+            const conf = await connection.confirmTransaction(
+              { signature: sig, blockhash, lastValidBlockHeight },
+              "confirmed",
             );
+            if (conf.value.err) {
+              throw new Error(
+                `cancel_bounty reverted on-chain: ${JSON.stringify(conf.value.err)}`,
+              );
+            }
           }
         } catch (cancelErr) {
           // BountyNotOpen / already-settled branch: the escrow is empty,
@@ -185,18 +212,27 @@ export function BountyEditMenu({
           // Anything else (wallet rejection, RPC down, real revert) is a
           // hard failure — abort so the user can retry without orphaning
           // the on-chain account.
-          const msg =
+          //
+          // In gas-station mode the relevant detail lives on the
+          // `GasStationClientError.reason` field (the route forwards the
+          // on-chain `value.err` text), so we check that *too*.
+          const baseMsg =
             cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
+          const reasonMsg =
+            cancelErr instanceof GasStationClientError
+              ? (cancelErr.reason ?? "")
+              : "";
+          const haystack = `${baseMsg} ${reasonMsg}`;
           const alreadySettled =
             /BountyNotOpen|already.*(cancel|resolv)|account.*not.*initialized/i.test(
-              msg,
+              haystack,
             );
           if (!alreadySettled) {
             throw cancelErr;
           }
           console.warn(
             "[BountyEditMenu] cancel_bounty skipped (already settled):",
-            msg,
+            haystack,
           );
         }
       }
@@ -211,7 +247,7 @@ export function BountyEditMenu({
       onChanged();
     } catch (err) {
       console.error("[BountyEditMenu] delete failed:", err);
-      setError(err instanceof Error ? err.message : "Delete failed.");
+      setError(formatGasStationError(err));
     } finally {
       setBusy(false);
       setPhase("idle");
