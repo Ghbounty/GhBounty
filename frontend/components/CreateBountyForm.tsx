@@ -228,7 +228,7 @@ export function CreateBountyForm({
 
         <label className="field">
           <span className="field-label">
-            Bounty amount <span className="musdc-inline">SOL</span>
+            Bounty amount <span className="token-inline">SOL</span>
           </span>
           <input
             name="amount"

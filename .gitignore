@@ -49,3 +49,4 @@ Cargo.lock
 # bounty_judge
 bounty_judge/.venv/
 bounty_judge/.pytest_cache/
+.vercel

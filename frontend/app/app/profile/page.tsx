@@ -884,7 +884,7 @@ function SubmissionRow({
             <span className="bounty-amount-val">
               {bounty.amountUsdc.toLocaleString()}
             </span>
-            <span className="musdc-pill">SOL</span>
+            <span className="token-pill">SOL</span>
           </div>
         )}
         {typeof score === "number" && (

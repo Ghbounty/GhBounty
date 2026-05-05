@@ -333,7 +333,7 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
             <span className="bounty-amount-val">
               {bounty.amountUsdc.toLocaleString()}
             </span>
-            <span className="musdc-pill">SOL</span>
+            <span className="token-pill">SOL</span>
           </div>
         </div>
 

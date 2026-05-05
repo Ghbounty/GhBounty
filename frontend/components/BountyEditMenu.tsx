@@ -423,7 +423,7 @@ function BountyEditModal({
 
           <label className="field">
             <span className="field-label">
-              Bounty amount <span className="musdc-inline">SOL</span>
+              Bounty amount <span className="token-inline">SOL</span>
             </span>
             <div className="field-with-icon">
               <span className="field-icon"><UsdcIcon size={18} /></span>
