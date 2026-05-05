@@ -7,11 +7,13 @@
  * `chainId` from the request and never has to know about the actual
  * implementation.
  *
- * Today the router throws `not_implemented` for every chain — the
- * Solana impl ships in GHB-174. Once that lands, the relevant
- * `case` flips to `return new SolanaGasStation(chainId, ...deps)`.
- * Adding EVM (GHB-178) is the same shape: new case, new impl, no
- * caller changes.
+ * The `SolanaGasStation` impl ships in GHB-174 but the router stays
+ * `not_implemented` for now: it has no way to obtain the runtime
+ * deps (keypair + RPC submitter) without leaking knowledge of those
+ * deps to every caller. The wiring lands in GHB-175 (the api route),
+ * which is the right layer to own boot-time singleton construction.
+ * Until then, callers import `SolanaGasStation` directly.
+ * Adding EVM (GHB-178) follows the same pattern.
  */
 
 import type { ChainId } from "../chains.js";
@@ -21,14 +23,12 @@ export function getGasStation(chainId: ChainId): GasStation {
   switch (chainId) {
     case "solana-devnet":
     case "solana-mainnet":
-      // Filled by GHB-174. Throwing now keeps the contract honest:
-      // any caller that imports getGasStation today is forced to
-      // handle the not_implemented path — which they will keep
-      // handling once a real impl exists, because RPC failures are
-      // a real runtime case anyway.
+      // Wiring lands in GHB-175 (api route's boot-time DI). Until
+      // then, consumers import `SolanaGasStation` directly. Throwing
+      // here keeps any accidental router-based caller loud.
       throw new GasStationError(
         "not_implemented",
-        `Solana gas station not wired yet (GHB-174 fills this). chainId=${chainId}`,
+        `Solana gas station router not wired (GHB-175). Import SolanaGasStation directly. chainId=${chainId}`,
       );
     default: {
       // Exhaustiveness guard. Adding a new ChainId variant in
@@ -52,3 +52,31 @@ export type {
 } from "./types.js";
 
 export { GasStationError } from "./types.js";
+
+// GHB-174 — Solana implementation. Exposed at the barrel level so
+// the route handler in GHB-175 can `new SolanaGasStation({...})`
+// directly without going through the chain router. The router
+// itself stays `not_implemented` until that wiring lands.
+export {
+  SolanaGasStation,
+  loadGasStationKeypair,
+} from "./solana.js";
+export type {
+  SolanaGasStationDeps,
+  SolanaRpcSubmitter,
+  SponsorLogEntry,
+} from "./solana.js";
+
+// GHB-173 — validator (used by SolanaGasStation but also exported
+// for tests / ops scripts that want to dry-run the rules).
+export {
+  validateSolanaSponsorTx,
+  ESCROW_PROGRAM_ID,
+  ALLOWED_DISCRIMINATORS_HEX,
+  MAX_FEE_LAMPORTS,
+} from "./solana-validator.js";
+export type {
+  ValidateOptions,
+  ValidatorResult,
+  ValidatorRejectionCode,
+} from "./solana-validator.js";
