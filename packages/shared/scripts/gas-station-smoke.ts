@@ -1,19 +1,23 @@
 /**
- * GHB-174 — SolanaGasStation devnet smoke test.
+ * GHB-180 — true 0-SOL user smoke test against devnet.
  *
- * Runs the full SolanaGasStation pipeline against a live cluster:
- *   1. Build a real `create_bounty` tx (Anchor-shaped data, real PDA).
- *   2. Hand it to SolanaGasStation as a base64 partially-signed tx.
- *   3. The gas station validates → signs → submits → confirms.
- *   4. We check the on-chain balance delta matches expectations.
+ * Demonstrates the full sponsored flow with a freshly-generated user
+ * keypair that has NEVER held SOL. The gas station pays:
+ *   - the network fee (5_000 lamports)
+ *   - the rent for the new Bounty PDA (~2.5M lamports)
+ *   - the bounty escrow amount itself (1_000 lamports here for the
+ *     smoke; in production the company wallet usually funds this
+ *     part out of its own balance)
  *
- * To keep setup minimal, the gas-station is also the bounty creator.
- * That means a single funded keypair is enough: it pays both the
- * 5_000-lamport network fee AND the bounty rent + escrow amount.
- * In production those will be separate parties (gas station = us,
- * creator = a Privy embedded wallet), but the gas-station path
- * exercised here is identical either way: validate, fee_payer-sign,
- * submit, confirm.
+ * Pipeline (per run):
+ *   1. Generate a throwaway user keypair (0 SOL).
+ *   2. Build [transfer(gas → user, topup), create_bounty(creator=user)].
+ *   3. User partial-signs (their slot only) using the local secret —
+ *      mirrors what Privy does in the browser.
+ *   4. Hand the b64 tx to SolanaGasStation, which validates, signs as
+ *      fee payer (slot 0), submits, and confirms.
+ *   5. Verify on-chain: tx confirmed, gas-station balance dropped,
+ *      user wallet ends with (topup - rent - amount) lamports.
  *
  * Required env:
  *   GAS_STATION_KEYPAIR_JSON | GAS_STATION_KEYPAIR_PATH — keypair source
@@ -22,9 +26,8 @@
  * Run:
  *   pnpm --filter @ghbounty/shared smoke:gas-station
  *
- * Cost per run on devnet: ~0.003 SOL (rent + fee + 1000-lamport escrow).
- * The keypair needs ≥ ~0.005 SOL to be safe; fund with:
- *   solana airdrop 1 <pubkey> --url devnet
+ * Cost per run on devnet: ~3M lamports (~0.003 SOL). The keypair
+ * needs ≥ ~0.005 SOL to be safe.
  */
 
 import {
@@ -46,16 +49,16 @@ import {
 
 const RPC_URL = process.env.RPC_URL || "https://api.devnet.solana.com";
 const COMMITMENT = "confirmed" as const;
-const MIN_BALANCE_LAMPORTS = 5_000_000; // ~0.005 SOL — covers fee + rent + amount
+const MIN_BALANCE_LAMPORTS = 5_000_000; // ~0.005 SOL — covers fee + topup + amount
+// Bounty PDA rent on devnet is ~3.47M lamports + the escrow amount
+// (1_000 in this smoke) needs to flow from user → bounty too. We
+// over-fund by ~50% so the smoke is robust to small rent epoch
+// fluctuations. The leftover stays in the throwaway user wallet.
+const TOPUP_LAMPORTS = 5_000_000; // ~0.005 SOL
 
 /**
- * Borsh-encode the create_bounty args. We do this by hand to avoid
- * pulling Anchor's whole runtime into shared/. Layout (from the IDL):
- *   discriminator: [u8; 8]      → "7a5a0e8f087dc802"
- *   bounty_id:     u64 LE
- *   amount:        u64 LE
- *   scorer:        Pubkey (32 bytes)
- *   github_issue_url: string    → u32 LE length + UTF-8 bytes
+ * Borsh-encode the create_bounty args. Hand-rolled to avoid pulling
+ * Anchor's runtime into shared/.
  */
 function encodeCreateBountyData(
   bountyId: bigint,
@@ -77,43 +80,58 @@ function encodeCreateBountyData(
 
 async function main(): Promise<void> {
   const gasStation = loadGasStationKeypair();
+  const user = Keypair.generate(); // FRESH — never held SOL
   const connection = new Connection(RPC_URL, COMMITMENT);
 
   console.log(`gas station: ${gasStation.publicKey.toBase58()}`);
+  console.log(`user (new):  ${user.publicKey.toBase58()}`);
   console.log(`rpc:         ${RPC_URL}\n`);
 
-  const balanceBefore = await connection.getBalance(gasStation.publicKey);
+  const gasBefore = await connection.getBalance(gasStation.publicKey);
   console.log(
-    `balance before: ${balanceBefore} lamports (${(balanceBefore / 1e9).toFixed(6)} SOL)`,
+    `gas station balance: ${gasBefore} lamports (${(gasBefore / 1e9).toFixed(6)} SOL)`,
   );
-  if (balanceBefore < MIN_BALANCE_LAMPORTS) {
+  if (gasBefore < MIN_BALANCE_LAMPORTS) {
     throw new Error(
-      `gas station has only ${balanceBefore} lamports; need at least ${MIN_BALANCE_LAMPORTS}.\n` +
-        `  Fund with:  solana airdrop 1 ${gasStation.publicKey.toBase58()} --url devnet`,
+      `gas station has only ${gasBefore} lamports; need at least ${MIN_BALANCE_LAMPORTS}.`,
     );
   }
+  const userBefore = await connection.getBalance(user.publicKey);
+  console.log(
+    `user balance:        ${userBefore} lamports (${(userBefore / 1e9).toFixed(6)} SOL — should be 0)`,
+  );
+  if (userBefore !== 0) {
+    console.warn("(user keypair was funded somehow — smoke still proceeds)");
+  }
 
-  // Unique bounty per run (PDA collision otherwise — `create_bounty`
-  // calls `init` which fails if the PDA exists).
+  // Build create_bounty args.
   const bountyId = BigInt(Date.now());
-  const amount = 1_000n; // tiny escrow — minimizes per-run cost
+  const amount = 1_000n;
   const scorer = Keypair.generate().publicKey;
   const issueUrl = `https://github.com/ghbounty/smoke/issues/${bountyId}`;
 
-  // Derive the bounty PDA the same way the program will.
+  // Bounty PDA = ["bounty", creator, bounty_id_le].
   const idLe = Buffer.alloc(8);
   idLe.writeBigUInt64LE(bountyId);
   const [bountyPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("bounty"), gasStation.publicKey.toBytes(), idLe],
+    [Buffer.from("bounty"), user.publicKey.toBytes(), idLe],
     ESCROW_PROGRAM_ID,
   );
 
-  const ix = new TransactionInstruction({
+  // Ix #1: gas_station → user topup. The validator on the server
+  // checks source == fee_payer (== gas station) AND dest is a
+  // non-fee-payer signer (== user, since they sign the create_bounty).
+  const topupIx = SystemProgram.transfer({
+    fromPubkey: gasStation.publicKey,
+    toPubkey: user.publicKey,
+    lamports: TOPUP_LAMPORTS,
+  });
+
+  // Ix #2: create_bounty with creator = user.
+  const createIx = new TransactionInstruction({
     programId: ESCROW_PROGRAM_ID,
     keys: [
-      // creator — gas station here, doubles up as fee_payer
-      { pubkey: gasStation.publicKey, isSigner: true, isWritable: true },
-      // bounty PDA — init'd by the program
+      { pubkey: user.publicKey, isSigner: true, isWritable: true },
       { pubkey: bountyPda, isSigner: false, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
     ],
@@ -124,17 +142,19 @@ async function main(): Promise<void> {
   const msg = new TransactionMessage({
     payerKey: gasStation.publicKey,
     recentBlockhash: blockhash,
-    instructions: [ix],
+    instructions: [topupIx, createIx],
   }).compileToV0Message();
-  const txB64 = Buffer.from(new VersionedTransaction(msg).serialize()).toString(
-    "base64",
-  );
+  const tx = new VersionedTransaction(msg);
 
-  console.log(
-    `\nbuilt create_bounty(id=${bountyId}, amount=${amount} lamports)`,
-  );
+  // User partial-signs FIRST (their slot only). The gas station
+  // signs slot 0 inside SolanaGasStation. `tx.sign([user])` only
+  // touches slots whose pubkey matches the user — slot 0 stays empty.
+  tx.sign([user]);
+
+  const txB64 = Buffer.from(tx.serialize()).toString("base64");
+
+  console.log(`\nbuilt [topup(${TOPUP_LAMPORTS}), create_bounty(id=${bountyId}, amount=${amount})]`);
   console.log(`bounty pda:  ${bountyPda.toBase58()}`);
-  console.log(`scorer:      ${scorer.toBase58()}`);
 
   const station = new SolanaGasStation({
     chainId: "solana-devnet",
@@ -154,19 +174,16 @@ async function main(): Promise<void> {
   );
   console.log(`  duration:     ${result.durationMs}ms`);
 
-  const balanceAfter = await connection.getBalance(gasStation.publicKey);
-  const spent = balanceBefore - balanceAfter;
-  console.log(
-    `\nbalance after:  ${balanceAfter} lamports (${(balanceAfter / 1e9).toFixed(6)} SOL)`,
-  );
-  console.log(
-    `total spent:    ${spent} lamports (${(spent / 1e9).toFixed(6)} SOL)`,
-  );
-  console.log(`  base fee:      5_000 lamports`);
-  console.log(`  escrow amt:    ${amount} lamports (transferred to bounty PDA)`);
-  console.log(
-    `  bounty rent:   ~${spent - 5_000 - Number(amount)} lamports (PDA init)`,
-  );
+  const gasAfter = await connection.getBalance(gasStation.publicKey);
+  const userAfter = await connection.getBalance(user.publicKey);
+  const gasSpent = gasBefore - gasAfter;
+  console.log(`\ngas station balance after: ${gasAfter} lamports`);
+  console.log(`gas station spent:         ${gasSpent} lamports (${(gasSpent / 1e9).toFixed(6)} SOL)`);
+  console.log(`  fee:                     5_000 lamports`);
+  console.log(`  topup→user:              ${TOPUP_LAMPORTS} lamports`);
+  console.log(`\nuser balance after: ${userAfter} lamports (${(userAfter / 1e9).toFixed(6)} SOL)`);
+  console.log(`  = topup ${TOPUP_LAMPORTS} - rent for Bounty PDA - ${amount} escrow amount`);
+  console.log(`\n✓ proved: a 0-SOL user wallet successfully created a bounty via the gas station.`);
 }
 
 main().catch((err) => {

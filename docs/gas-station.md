@@ -49,9 +49,42 @@ Hard caps enforced by the validator (`packages/shared/src/gas-station/solana-val
   this is rejected with `fee_exceeds_cap`.
 - `BASE_FEE_LAMPORTS_PER_SIGNATURE = 5_000` — Solana's protocol-level
   base fee per signature, unchanged for years.
+- `MAX_TOPUP_LAMPORTS = 50_000_000` — cap on the optional bundled
+  `SystemProgram.transfer` (gas station → user) that funds rent for
+  a freshly-init'd PDA. Anything above is rejected with
+  `topup_transfer_invalid`.
 
-Sized so a fully-loaded sponsored tx costs ≤ 0.00005 SOL. With a 5-SOL
-gas-station balance, that's ≥ 100,000 sponsored txs before refill.
+A fully-loaded sponsored tx with topup costs ≤ ~0.05 SOL worst case
+(realistically ~0.003 SOL since rent is ~2-3M lamports per PDA). With
+a 5-SOL gas-station balance, that's ≥ 100 sponsored topup txs.
+
+## Topup transfer policy (GHB-180)
+
+`create_bounty` and `submit_solution` both `init` a new PDA whose rent
+must come from the user (Anchor hardcodes `payer = creator/solver`).
+For users with 0 SOL on Privy embedded wallets, we bundle a system
+transfer in the same tx so the user has rent at the time the escrow
+ix runs:
+
+| Ix                | Bundle topup? | Amount         | Notes                                                     |
+| ----------------- | ------------- | -------------- | --------------------------------------------------------- |
+| `create_bounty`   | yes           | 5_000_000      | Bounty PDA rent (~3.47M devnet) + buffer.                 |
+| `submit_solution` | yes           | 3_000_000      | Submission PDA rent (~2.4M devnet) + buffer.              |
+| `resolve_bounty`  | no            | —              | No init; no rent needed.                                  |
+| `cancel_bounty`   | no            | —              | No init; no rent needed.                                  |
+
+The validator enforces:
+
+- Source of the topup transfer = the fee payer (gas station).
+- Destination is a non-fee-payer signer in the tx (i.e. the user
+  who signed the escrow ix). A non-signer destination is rejected —
+  that would let an attacker exfiltrate gas-station SOL to any pubkey.
+- At most ONE topup transfer per tx.
+- Amount ≤ `MAX_TOPUP_LAMPORTS`.
+
+Leftover dust stays in the user wallet — fine, since it's bounded
+per-tx and total drainage is capped by the wallet balance + reserve
+floor.
 
 ---
 

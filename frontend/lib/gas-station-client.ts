@@ -28,6 +28,7 @@
 import {
   Connection,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -112,6 +113,17 @@ export interface SubmitSponsoredArgs {
   /** Used only for `getLatestBlockhash`. */
   connection: Connection;
   /**
+   * GHB-180 — bundle a `SystemProgram.transfer(gas_station → user, n)`
+   * before the escrow ix so a 0-SOL Privy wallet can pay rent for an
+   * `init`'d PDA (Bounty for create_bounty, Submission for
+   * submit_solution). Pass `undefined` when no rent is needed
+   * (cancel_bounty, resolve_bounty).
+   *
+   * The amount must be ≤ MAX_TOPUP_LAMPORTS server-side, otherwise
+   * the route returns 422 `topup_transfer_invalid`.
+   */
+  topupLamports?: number;
+  /**
    * Override the gas-station pubkey (tests). Defaults to the module
    * env-derived constant.
    */
@@ -145,11 +157,42 @@ export async function submitSponsored(
 
   // 1. Build the unsigned VersionedTransaction. Fee payer must be the
   //    gas station — the validator on the server checks `staticAccountKeys[0]`.
+  //    GHB-180: optionally prepend a SystemProgram.transfer that
+  //    funds the user's wallet so it can pay rent for an init'd PDA.
   const { blockhash } = await args.connection.getLatestBlockhash("confirmed");
+  const instructions: TransactionInstruction[] = [];
+  if (args.topupLamports !== undefined && args.topupLamports > 0) {
+    if (!Number.isFinite(args.topupLamports) || !Number.isInteger(args.topupLamports)) {
+      throw new GasStationClientError(
+        500,
+        null,
+        `topupLamports must be a non-negative integer, got: ${args.topupLamports}`,
+      );
+    }
+    let userPubkey: PublicKey;
+    try {
+      userPubkey = new PublicKey(args.wallet.address);
+    } catch (err) {
+      throw new GasStationClientError(
+        500,
+        null,
+        `wallet.address is not a valid pubkey: ${(err as Error).message}`,
+      );
+    }
+    instructions.push(
+      SystemProgram.transfer({
+        fromPubkey: gasStationPubkey,
+        toPubkey: userPubkey,
+        lamports: args.topupLamports,
+      }),
+    );
+  }
+  instructions.push(args.ix);
+
   const message = new TransactionMessage({
     payerKey: gasStationPubkey,
     recentBlockhash: blockhash,
-    instructions: [args.ix],
+    instructions,
   }).compileToV0Message();
   const tx = new VersionedTransaction(message);
   const unsignedBytes = tx.serialize();

@@ -193,6 +193,12 @@ export function CreateBountyFlow({
           signTransaction,
           getAccessToken: () => privy.getAccessToken(),
           connection,
+          // GHB-180 — bundle a rent topup so a 0-SOL Privy wallet can
+          // pay the Bounty PDA's `init` rent. The smoke confirmed
+          // ~3.47M lamports rent on devnet; we over-fund to ~5M for a
+          // safety margin (well below the validator's 0.05 SOL cap).
+          // Leftover dust stays in the user's wallet — fine.
+          topupLamports: 5_000_000,
         });
         sig = result.txHash;
         setTxSig(sig);

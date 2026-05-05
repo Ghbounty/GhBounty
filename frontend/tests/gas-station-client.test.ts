@@ -139,6 +139,96 @@ describe("submitSponsored — happy path", () => {
     expect(decoded.length).toBe(signCall.transaction.length);
   });
 
+  test("topupLamports prepends a SystemProgram.transfer (gas_station → user) before the escrow ix", async () => {
+    const userKp = Keypair.generate();
+    const ix = makeIx(userKp.publicKey);
+    const { signTransaction, getAccessToken } = makePrivyStubs();
+    const wallet = {
+      address: userKp.publicKey.toBase58(),
+    } as unknown as ConnectedStandardSolanaWallet;
+    const fetchImpl = makeFetchOk("sig-topup");
+
+    await submitSponsored({
+      ix,
+      wallet,
+      signTransaction,
+      getAccessToken,
+      connection: makeConnection(),
+      gasStationPubkey: GAS_STATION,
+      topupLamports: 1_500_000,
+      fetchImpl,
+    });
+
+    // The signed tx must have 2 ixs: transfer first, then the escrow ix.
+    const signCall = (signTransaction as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { transaction: Uint8Array };
+    const sentTx = VersionedTransaction.deserialize(signCall.transaction);
+    expect(sentTx.message.compiledInstructions).toHaveLength(2);
+    // First ix is SystemProgram (programId at index 0 in static keys
+    // is the gas station / fee payer; SystemProgram lives at a later
+    // index — easy to verify via accountKeys lookup).
+    const firstIx = sentTx.message.compiledInstructions[0]!;
+    const firstProgram =
+      sentTx.message.staticAccountKeys[firstIx.programIdIndex]!;
+    expect(firstProgram.toBase58()).toBe("11111111111111111111111111111111");
+    // Source = fee payer (index 0), dest is the user.
+    expect(firstIx.accountKeyIndexes[0]).toBe(0);
+    const destIdx = firstIx.accountKeyIndexes[1]!;
+    expect(
+      sentTx.message.staticAccountKeys[destIdx]!.equals(userKp.publicKey),
+    ).toBe(true);
+  });
+
+  test("topupLamports = 0 / undefined → no transfer ix prepended", async () => {
+    const ix = makeIx(Keypair.generate().publicKey);
+    const { wallet, signTransaction, getAccessToken } = makePrivyStubs();
+    const fetchImpl = makeFetchOk("sig-no-topup");
+
+    await submitSponsored({
+      ix,
+      wallet,
+      signTransaction,
+      getAccessToken,
+      connection: makeConnection(),
+      gasStationPubkey: GAS_STATION,
+      // no topupLamports
+      fetchImpl,
+    });
+
+    const signCall = (signTransaction as unknown as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as { transaction: Uint8Array };
+    const sentTx = VersionedTransaction.deserialize(signCall.transaction);
+    expect(sentTx.message.compiledInstructions).toHaveLength(1);
+  });
+
+  test("topupLamports with bad wallet.address → 500 client error before fetch", async () => {
+    const ix = makeIx(Keypair.generate().publicKey);
+    const { signTransaction, getAccessToken } = makePrivyStubs();
+    const wallet = {
+      address: "not-a-pubkey",
+    } as unknown as ConnectedStandardSolanaWallet;
+    const fetchImpl = makeFetchOk("never-reached");
+
+    let caught: GasStationClientError | undefined;
+    try {
+      await submitSponsored({
+        ix,
+        wallet,
+        signTransaction,
+        getAccessToken,
+        connection: makeConnection(),
+        gasStationPubkey: GAS_STATION,
+        topupLamports: 1_500_000,
+        fetchImpl,
+      });
+    } catch (e) {
+      caught = e as GasStationClientError;
+    }
+    expect(caught?.status).toBe(500);
+    expect(caught?.message).toContain("wallet.address is not a valid pubkey");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   test("forwards solana-mainnet chainId when configured", async () => {
     const userPk = Keypair.generate().publicKey;
     const ix = makeIx(userPk);

@@ -25,6 +25,7 @@ import {
   PublicKey,
   VersionedTransaction,
   ComputeBudgetProgram,
+  SystemProgram,
 } from "@solana/web3.js";
 
 /**
@@ -60,11 +61,31 @@ export const ALLOWED_DISCRIMINATORS_HEX: ReadonlySet<string> = new Set([
  */
 export const MAX_FEE_LAMPORTS = 50_000;
 
+/**
+ * GHB-180 — per-tx cap on the optional rent-topup transfer that
+ * funds a 0-SOL user wallet so it can pay rent for a freshly-init'd
+ * PDA (Bounty / Submission). 50_000_000 lamports = 0.05 SOL —
+ * generous (rent for either struct is < 0.003 SOL) but bounded so
+ * a single malicious tx can't drain the gas-station wallet at once.
+ *
+ * Total drainage is still capped by `getBalanceLamports() <
+ * minReserveLamports` in the route + the wallet balance itself, so
+ * worst case is `wallet_balance / MAX_TOPUP_LAMPORTS` malicious
+ * txs before sponsorship halts.
+ */
+export const MAX_TOPUP_LAMPORTS = 50_000_000;
+
 /** Base signature fee on Solana (mainnet + devnet, unchanged for years). */
 const BASE_FEE_LAMPORTS_PER_SIGNATURE = 5_000;
 
 /** ComputeBudget program ID — public constant on Solana. */
 const COMPUTE_BUDGET_PROGRAM_ID = ComputeBudgetProgram.programId;
+/** System program ID — public constant on Solana. */
+const SYSTEM_PROGRAM_ID = SystemProgram.programId;
+/** SystemProgram.Transfer ix discriminator (u32 LE). */
+const SYSTEM_TRANSFER_DISC = 2;
+/** SystemProgram.Transfer ix data length: 4-byte disc + 8-byte u64 lamports. */
+const SYSTEM_TRANSFER_DATA_LEN = 12;
 
 /** Discriminator (first byte of ix data) for SetComputeUnitLimit. */
 const COMPUTE_LIMIT_DISC = 0x02;
@@ -81,7 +102,9 @@ export type ValidatorRejectionCode =
   | "wrong_program_id"
   | "missing_discriminator"
   | "disallowed_discriminator"
-  | "fee_exceeds_cap";
+  | "fee_exceeds_cap"
+  | "topup_transfer_invalid"
+  | "multiple_topup_transfers";
 
 export type ValidatorResult =
   | {
@@ -90,6 +113,12 @@ export type ValidatorResult =
       discriminatorHex: string;
       /** Estimated fee in lamports (base × signers + priority). */
       estimatedFeeLamports: number;
+      /**
+       * GHB-180 — lamports moved from the gas station to the user via the
+       * optional bundled `SystemProgram.transfer`. 0 when no topup ix
+       * was present. The route sums this with the fee for budget logging.
+       */
+      topupLamports: number;
     }
   | { ok: false; code: ValidatorRejectionCode; reason: string };
 
@@ -98,6 +127,10 @@ export interface ValidateOptions {
   expectedFeePayer: PublicKey;
   /** Optional override for tests. Defaults to `MAX_FEE_LAMPORTS`. */
   maxFeeLamports?: number;
+  /**
+   * Optional override for tests. Defaults to `MAX_TOPUP_LAMPORTS`.
+   */
+  maxTopupLamports?: number;
   /**
    * Optional override of the allowed program. Defaults to the project
    * escrow. Tests pass a fake to exercise the wrong-program path.
@@ -118,6 +151,7 @@ export function validateSolanaSponsorTx(
   opts: ValidateOptions,
 ): ValidatorResult {
   const max = opts.maxFeeLamports ?? MAX_FEE_LAMPORTS;
+  const maxTopup = opts.maxTopupLamports ?? MAX_TOPUP_LAMPORTS;
   const programId = opts.expectedProgramId ?? ESCROW_PROGRAM_ID;
   const allowed = opts.allowedDiscriminators ?? ALLOWED_DISCRIMINATORS_HEX;
 
@@ -161,11 +195,25 @@ export function validateSolanaSponsorTx(
     };
   }
 
-  // Rule 2: separate instructions into compute-budget (allowed) and
-  // escrow (validated). Anything else = reject.
+  // Rule 2: separate instructions into:
+  //   - compute-budget (allowed, parsed for fee estimation)
+  //   - SystemProgram.transfer (allowed at most ONCE, must be a
+  //     gas-station→user rent topup, GHB-180)
+  //   - escrow (validated, exactly ONE)
+  //   - anything else = reject
   let escrowIxIdx = -1;
   let computeUnitLimit: number | null = null;
   let computeUnitPriceMicroLamports: number | null = null;
+  let topupLamports = 0;
+  let sawTopup = false;
+
+  // numRequiredSignatures gives us the count of signer slots in
+  // `staticAccountKeys`. The fee payer is at index 0; user signers
+  // (creator/solver) sit in [1, numRequiredSignatures). The topup
+  // destination must be one of those — never the fee payer (would
+  // be a no-op self-transfer) and never a non-signer (would let an
+  // attacker exfiltrate to an arbitrary account they don't control).
+  const numSigners = message.header.numRequiredSignatures;
 
   for (let i = 0; i < message.compiledInstructions.length; i += 1) {
     const ix = message.compiledInstructions[i]!;
@@ -187,6 +235,42 @@ export function validateSolanaSponsorTx(
       continue;
     }
 
+    if (ixProgram.equals(SYSTEM_PROGRAM_ID)) {
+      // Only Transfer is allowed; CreateAccount / Assign / etc. are
+      // rejected because they can move ownership of the gas-station
+      // signer or assign new accounts to arbitrary programs.
+      const parsedTopup = parseTopupTransferIx(
+        ix.data,
+        ix.accountKeyIndexes,
+        accountKeys,
+        numSigners,
+      );
+      if (!parsedTopup.ok) {
+        return {
+          ok: false,
+          code: "topup_transfer_invalid",
+          reason: `instruction ${i}: ${parsedTopup.reason}`,
+        };
+      }
+      if (sawTopup) {
+        return {
+          ok: false,
+          code: "multiple_topup_transfers",
+          reason: `instruction ${i}: a second SystemProgram.transfer is not allowed`,
+        };
+      }
+      if (parsedTopup.lamports > maxTopup) {
+        return {
+          ok: false,
+          code: "topup_transfer_invalid",
+          reason: `topup transfer ${parsedTopup.lamports} lamports exceeds cap ${maxTopup}`,
+        };
+      }
+      sawTopup = true;
+      topupLamports = parsedTopup.lamports;
+      continue;
+    }
+
     if (ixProgram.equals(programId)) {
       if (escrowIxIdx !== -1) {
         return {
@@ -202,7 +286,7 @@ export function validateSolanaSponsorTx(
     return {
       ok: false,
       code: "extra_unknown_instruction",
-      reason: `instruction ${i} targets ${ixProgram.toBase58()} which is neither escrow nor compute-budget`,
+      reason: `instruction ${i} targets ${ixProgram.toBase58()} which is neither escrow, compute-budget, nor system`,
     };
   }
 
@@ -257,7 +341,82 @@ export function validateSolanaSponsorTx(
     ok: true,
     discriminatorHex,
     estimatedFeeLamports,
+    topupLamports,
   };
+}
+
+/**
+ * Parse a SystemProgram instruction and validate it's a Transfer of
+ * the form `gas_station → user` within the allowed shape.
+ *
+ * Layout of a Transfer ix:
+ *   data:    [u32 LE disc=2, u64 LE lamports]   → 12 bytes
+ *   accounts: [from (signer, writable), to (writable)]
+ *
+ * We accept ONLY this shape — no CreateAccount, no Assign, etc.
+ * Source must be the fee payer (= gas station, the validator's
+ * caller is responsible for that equality check at rule 1). Dest
+ * must be a signer slot OTHER than the fee payer (the user's wallet
+ * — `creator` for create_bounty, `solver` for submit_solution).
+ */
+function parseTopupTransferIx(
+  data: Uint8Array,
+  accountKeyIndexes: readonly number[] | Uint8Array,
+  accountKeys: readonly PublicKey[],
+  numSigners: number,
+):
+  | { ok: true; lamports: number }
+  | { ok: false; reason: string } {
+  if (data.length !== SYSTEM_TRANSFER_DATA_LEN) {
+    return {
+      ok: false,
+      reason: `system ix data is ${data.length} bytes, expected ${SYSTEM_TRANSFER_DATA_LEN} for Transfer`,
+    };
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const disc = view.getUint32(0, true);
+  if (disc !== SYSTEM_TRANSFER_DISC) {
+    return {
+      ok: false,
+      reason: `system ix discriminator ${disc} is not Transfer (${SYSTEM_TRANSFER_DISC}); CreateAccount/Assign/etc. are not sponsored`,
+    };
+  }
+  if (accountKeyIndexes.length !== 2) {
+    return {
+      ok: false,
+      reason: `system Transfer expects 2 accounts (from, to), got ${accountKeyIndexes.length}`,
+    };
+  }
+  const fromIdx = accountKeyIndexes[0]!;
+  const toIdx = accountKeyIndexes[1]!;
+  if (fromIdx !== 0) {
+    return {
+      ok: false,
+      reason: `topup transfer source must be the fee payer (account index 0), got index ${fromIdx}`,
+    };
+  }
+  if (toIdx === 0 || toIdx >= numSigners) {
+    // toIdx must point to a signer slot other than 0. accountKeys is
+    // [feePayer, ...otherSigners, ...nonSigners] so a valid topup dest
+    // sits in [1, numSigners). A non-signer destination would let a
+    // crafted tx exfiltrate gas-station SOL to any pubkey.
+    return {
+      ok: false,
+      reason: `topup transfer destination must be a non-fee-payer signer (index in [1, ${numSigners})), got index ${toIdx}`,
+    };
+  }
+  // Sanity: both indices must be in bounds.
+  if (fromIdx >= accountKeys.length || toIdx >= accountKeys.length) {
+    return {
+      ok: false,
+      reason: `topup transfer references account index out of bounds`,
+    };
+  }
+  const lo = view.getUint32(4, true);
+  const hi = view.getUint32(8, true);
+  // u64 LE → JS Number. Lamports caps live well within 2^53.
+  const lamports = lo + hi * 0x1_0000_0000;
+  return { ok: true, lamports };
 }
 
 /**

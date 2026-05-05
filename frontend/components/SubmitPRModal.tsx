@@ -214,6 +214,12 @@ export function SubmitPRModal({ bounty, devId, onClose, onSubmitted }: Props) {
           signTransaction,
           getAccessToken: () => privy.getAccessToken(),
           connection,
+          // GHB-180 — bundle a rent topup so a 0-SOL dev wallet can
+          // pay the Submission PDA's `init` rent. ~0.003 SOL covers
+          // 8 + Submission::INIT_SPACE comfortably (well below the
+          // validator's 0.05 SOL cap). Sized smaller than create's
+          // topup because Submission has a smaller layout.
+          topupLamports: 3_000_000,
         });
         sig = result.txHash;
         setTxSig(sig);

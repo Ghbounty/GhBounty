@@ -3,6 +3,7 @@ import {
   ComputeBudgetProgram,
   Keypair,
   PublicKey,
+  SystemProgram,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
@@ -12,6 +13,7 @@ import {
   ALLOWED_DISCRIMINATORS_HEX,
   ESCROW_PROGRAM_ID,
   MAX_FEE_LAMPORTS,
+  MAX_TOPUP_LAMPORTS,
   validateSolanaSponsorTx,
 } from "../src/gas-station/solana-validator.js";
 
@@ -243,6 +245,233 @@ describe("validateSolanaSponsorTx — fee budget", () => {
   });
 });
 
+// ── GHB-180: rent-topup transfer ─────────────────────────────────────
+
+/**
+ * Build an escrow ix with TWO signers: gas-station (fee payer) AND
+ * a user (the creator/solver). This shape lets us prepend a topup
+ * transfer where dest sits in a non-fee-payer signer slot — exactly
+ * the production path the frontend client will send.
+ */
+function escrowIxTwoSigners(
+  discriminatorHex: string,
+  feePayer: PublicKey,
+  user: PublicKey,
+): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: ESCROW_PROGRAM_ID,
+    keys: [
+      // The user is the meaningful signer here (creator/solver in
+      // the real ix). We mark them isSigner so they end up in the
+      // non-fee-payer signer slot of staticAccountKeys.
+      { pubkey: user, isSigner: true, isWritable: true },
+      // Mention the fee_payer so it stays in accountKeys without
+      // forcing a second writability flag we don't need.
+      { pubkey: feePayer, isSigner: false, isWritable: false },
+    ],
+    data: Buffer.from(discriminatorHex, "hex"),
+  });
+}
+
+describe("validateSolanaSponsorTx — topup transfer happy paths", () => {
+  test("topup transfer + escrow ix → ok with topupLamports surfaced", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: USER,
+          lamports: 1_500_000, // typical Submission rent
+        }),
+        escrowIxTwoSigners("cbe99dbf4625cd00", GAS_STATION, USER),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.discriminatorHex).toBe("cbe99dbf4625cd00");
+      expect(r.topupLamports).toBe(1_500_000);
+    }
+  });
+
+  test("no topup ix → ok with topupLamports === 0 (back-compat)", () => {
+    const tx = buildTx([escrowIx("cbe99dbf4625cd00", GAS_STATION)], GAS_STATION);
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.topupLamports).toBe(0);
+  });
+});
+
+describe("validateSolanaSponsorTx — topup transfer rejections", () => {
+  test("topup amount > MAX_TOPUP_LAMPORTS → topup_transfer_invalid", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: USER,
+          lamports: MAX_TOPUP_LAMPORTS + 1,
+        }),
+        escrowIxTwoSigners("cbe99dbf4625cd00", GAS_STATION, USER),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("topup_transfer_invalid");
+      expect(r.reason).toContain("exceeds cap");
+    }
+  });
+
+  test("custom maxTopupLamports rejects below the constant", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: USER,
+          lamports: 1_000_000,
+        }),
+        escrowIxTwoSigners("cbe99dbf4625cd00", GAS_STATION, USER),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+      maxTopupLamports: 999_999,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("topup_transfer_invalid");
+  });
+
+  test("topup source != fee_payer → topup_transfer_invalid", () => {
+    // SystemProgram.transfer requires the source to be a signer. We
+    // can't build a "user→user" tx through compileToV0Message because
+    // the user wouldn't be the fee payer either. Instead, build a tx
+    // where USER is the fee payer and GAS_STATION is just any signer
+    // — that produces source=USER (fromPubkey) at index 0, which our
+    // validator then rejects via the wrong_fee_payer rule first.
+    // The shape we DO want to test: source=index>0 (non-fee-payer
+    // signer). Build that by making both signers and source=USER.
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: GAS_STATION,
+          lamports: 1_000,
+        }),
+        escrowIxTwoSigners("cbe99dbf4625cd00", GAS_STATION, USER),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("topup_transfer_invalid");
+      expect(r.reason).toContain("source must be the fee payer");
+    }
+  });
+
+  test("topup destination is the fee payer (self-transfer) → topup_transfer_invalid", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: GAS_STATION,
+          lamports: 1_000,
+        }),
+        escrowIxTwoSigners("cbe99dbf4625cd00", GAS_STATION, USER),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("topup_transfer_invalid");
+      expect(r.reason).toContain("destination must be a non-fee-payer signer");
+    }
+  });
+
+  test("topup destination is a non-signer pubkey → topup_transfer_invalid", () => {
+    // Add the random recipient via the escrow ix's accountsbut as a
+    // non-signer slot. Then the system transfer to that non-signer
+    // index would let an attacker exfiltrate to an arbitrary pubkey.
+    const ATTACKER = Keypair.generate().publicKey;
+    const escrow = new TransactionInstruction({
+      programId: ESCROW_PROGRAM_ID,
+      keys: [
+        { pubkey: USER, isSigner: true, isWritable: true },
+        { pubkey: ATTACKER, isSigner: false, isWritable: true }, // non-signer slot
+      ],
+      data: Buffer.from("cbe99dbf4625cd00", "hex"),
+    });
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: ATTACKER,
+          lamports: 1_000,
+        }),
+        escrow,
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("topup_transfer_invalid");
+      expect(r.reason).toContain("destination must be a non-fee-payer signer");
+    }
+  });
+
+  test("two topup transfers → multiple_topup_transfers", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: USER,
+          lamports: 1_000,
+        }),
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: USER,
+          lamports: 1_000,
+        }),
+        escrowIxTwoSigners("cbe99dbf4625cd00", GAS_STATION, USER),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("multiple_topup_transfers");
+  });
+
+  test("system ix that isn't Transfer (CreateAccount-shaped data) → topup_transfer_invalid", () => {
+    // Hand-craft a SystemProgram ix whose 4-byte LE disc is 0
+    // (CreateAccount). The validator must reject anything that isn't
+    // Transfer (disc=2).
+    const data = Buffer.alloc(12);
+    data.writeUInt32LE(0, 0); // disc=0 = CreateAccount
+    const ix = new TransactionInstruction({
+      programId: SystemProgram.programId,
+      keys: [
+        { pubkey: GAS_STATION, isSigner: true, isWritable: true },
+        { pubkey: USER, isSigner: true, isWritable: true },
+      ],
+      data,
+    });
+    const tx = buildTx(
+      [ix, escrowIxTwoSigners("cbe99dbf4625cd00", GAS_STATION, USER)],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), baseOpts);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("topup_transfer_invalid");
+      expect(r.reason).toContain("not Transfer");
+    }
+  });
+});
+
 // ── exhaustive rejection-code coverage check ─────────────────────────
 
 describe("validateSolanaSponsorTx — sanity", () => {
@@ -258,5 +487,9 @@ describe("validateSolanaSponsorTx — sanity", () => {
     expect(ESCROW_PROGRAM_ID.toBase58()).toBe(
       "CPZx26QXs3HjwGobr8cVAZEtF1qGzqnNbBdt7h1EwbBg",
     );
+  });
+
+  test("MAX_TOPUP_LAMPORTS is the documented 0.05 SOL cap", () => {
+    expect(MAX_TOPUP_LAMPORTS).toBe(50_000_000);
   });
 });
