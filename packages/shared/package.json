@@ -9,7 +9,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "smoke:gas-station": "tsx scripts/gas-station-smoke.ts"
+    "smoke:gas-station": "tsx scripts/gas-station-smoke.ts",
+    "health:gas-station": "tsx scripts/gas-station-health.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.95.0"
