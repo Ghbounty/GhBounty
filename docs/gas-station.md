@@ -69,7 +69,7 @@ ix runs:
 | Ix                | Bundle topup? | Amount         | Notes                                                     |
 | ----------------- | ------------- | -------------- | --------------------------------------------------------- |
 | `create_bounty`   | yes           | 5_000_000      | Bounty PDA rent (~3.47M devnet) + buffer.                 |
-| `submit_solution` | yes           | 3_000_000      | Submission PDA rent (~2.4M devnet) + buffer.              |
+| `submit_solution` | yes           | 5_000_000      | Submission PDA rent (~3.15M devnet) + buffer.             |
 | `resolve_bounty`  | no            | —              | No init; no rent needed.                                  |
 | `cancel_bounty`   | no            | —              | No init; no rent needed.                                  |
 
