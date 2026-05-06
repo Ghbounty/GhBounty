@@ -95,3 +95,28 @@ describe("GitHub Device Flow client", () => {
     });
   });
 });
+
+describe("token encryption", () => {
+  beforeEach(() => {
+    process.env.MCP_TOKEN_ENCRYPTION_KEY = "x".repeat(32);
+  });
+
+  it("encryptAccessToken / decryptAccessToken round-trip", async () => {
+    const { encryptAccessToken, decryptAccessToken } = await import(
+      "@/lib/github/device-flow"
+    );
+    const plaintext = "ghu_1234567890abcdef";
+    const encrypted = encryptAccessToken(plaintext);
+    expect(encrypted).not.toBe(plaintext);
+    expect(decryptAccessToken(encrypted)).toBe(plaintext);
+  });
+
+  it("decrypt fails on tampered ciphertext", async () => {
+    const { encryptAccessToken, decryptAccessToken } = await import(
+      "@/lib/github/device-flow"
+    );
+    const enc = encryptAccessToken("plaintext");
+    const tampered = enc.slice(0, -2) + "AA";
+    expect(() => decryptAccessToken(tampered)).toThrow();
+  });
+});
