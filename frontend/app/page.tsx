@@ -117,7 +117,13 @@ function Hero() {
       <div className="hero-content">
         <div className="badge hero-anim hero-anim-1">
           <span className="badge-dot" />
-          Deployed on mainnet
+          <span>Deployed on</span>
+          <img
+            src="/assets/solanalogo.png"
+            alt="Solana"
+            className="badge-chain-logo"
+          />
+          <span>mainnet</span>
         </div>
         <h1 className="hero-anim hero-anim-2">
           Automated bounties
@@ -147,17 +153,17 @@ function Hero() {
 /* ---------------- Terminal demo ---------------- */
 type TermLine = { k: "cmd" | "out" | "ok"; t: string };
 const TERMINAL_SCRIPT: TermLine[] = [
-  { k: "cmd", t: "$ ghbounty create --issue org/repo#42 --amount 250" },
-  { k: "out", t: "> Connecting wallet 0x94a2…9f1c" },
-  { k: "out", t: "> Deploying escrow contract on mainnet…" },
-  { k: "ok", t: "✓ Bounty #42 funded with 250 USDC" },
+  { k: "cmd", t: "$ ghbounty create --issue org/repo#42 --amount 3" },
+  { k: "out", t: "> Connecting wallet 7xK4…9f1c" },
+  { k: "out", t: "> Deploying escrow contract on Solana mainnet…" },
+  { k: "ok", t: "✓ Bounty #42 funded with 3 SOL" },
   { k: "cmd", t: "$ ghbounty submit --bounty 42 --pr org/repo#99" },
   { k: "out", t: "> AI validators evaluating PR…" },
   { k: "out", t: "> OpenAI   → passed (score 0.96)" },
   { k: "out", t: "> Ollama   → passed (score 0.91)" },
   { k: "out", t: "> Heurist  → passed (score 0.94)" },
   { k: "ok", t: "✓ GenLayer consensus: 5/5 validators approved" },
-  { k: "ok", t: "✓ 250 USDC released to 0x3f7c…a120 in 4.8s" },
+  { k: "ok", t: "✓ 3 SOL released to 5pTr…a120 in 4.8s" },
 ];
 
 function Terminal() {
@@ -320,7 +326,7 @@ function Solution() {
       I: IconLock,
       t: "Onchain Escrow",
       tag: "Mainnet",
-      d: "Lock USDC in smart contracts before work begins — no trust required.",
+      d: "Lock SOL in smart contracts before work begins — no trust required.",
     },
     {
       I: IconBolt,
@@ -388,7 +394,7 @@ function Pipeline() {
   }[] = [
     { I: IconGit, lbl: "Step 01", t: "PR submitted" },
     { I: IconBrain, lbl: "Step 02", t: "Validators reach consensus" },
-    { I: IconCheck, lbl: "Step 03", t: "USDC released" },
+    { I: IconCheck, lbl: "Step 03", t: "SOL released" },
   ];
   return (
     <div className="pipeline">
@@ -421,11 +427,11 @@ function HowItWorks() {
   const companies = [
     {
       t: "Post an issue — or scan a whole repo",
-      d: "Pin a single GitHub issue with scope and reward, or paste a public repo URL and let AI propose bounties + suggested USDC amounts for every open issue at once.",
+      d: "Pin a single GitHub issue with scope and reward, or paste a public repo URL and let AI propose bounties + suggested SOL amounts for every open issue at once.",
     },
     {
       t: "Deposit funds into escrow",
-      d: "Lock USDC into a smart contract. Funds are safe until a contribution is verified.",
+      d: "Lock SOL into a smart contract. Funds are safe until a contribution is verified.",
     },
     {
       t: "Pick auto-release or AI-assisted review",
@@ -666,12 +672,12 @@ type Bounty = {
   st: "open" | "reviewing" | "paid";
 };
 const BOUNTY_FEED: Bounty[] = [
-  { repo: "solana-labs/web3.js", title: "Add retry logic to RPC client", amt: 420, st: "open" },
-  { repo: "langchain-ai/langchain", title: "Fix memory leak in agent executor", amt: 1200, st: "reviewing" },
-  { repo: "vercel/next.js", title: "Support async generators in server actions", amt: 2500, st: "open" },
-  { repo: "tauri-apps/tauri", title: "Dark mode system theme detection", amt: 320, st: "paid" },
-  { repo: "supabase/supabase", title: "Realtime presence channel optimizations", amt: 850, st: "reviewing" },
-  { repo: "denoland/deno", title: "Implement WebGPU texture compression", amt: 3400, st: "open" },
+  { repo: "solana-labs/web3.js", title: "Add retry logic to RPC client", amt: 5, st: "open" },
+  { repo: "langchain-ai/langchain", title: "Fix memory leak in agent executor", amt: 14, st: "reviewing" },
+  { repo: "vercel/next.js", title: "Support async generators in server actions", amt: 29, st: "open" },
+  { repo: "tauri-apps/tauri", title: "Dark mode system theme detection", amt: 3.5, st: "paid" },
+  { repo: "supabase/supabase", title: "Realtime presence channel optimizations", amt: 9.8, st: "reviewing" },
+  { repo: "denoland/deno", title: "Implement WebGPU texture compression", amt: 39, st: "open" },
 ];
 
 function LiveBounties() {
@@ -696,7 +702,7 @@ function LiveBounties() {
     <section>
       <div className="container">
         <div className="section-head">
-          <div className="eyebrow">Live on mainnet</div>
+          <div className="eyebrow">Live on Solana mainnet</div>
           <h2>
             Watch bounties{" "}
             <span className="accent">settle in real time.</span>
@@ -717,7 +723,7 @@ function LiveBounties() {
                 <div className="repo">{r.repo}</div>
                 <div className="title">{r.title}</div>
               </div>
-              <div className="amount">{r.amt.toLocaleString()} USDC</div>
+              <div className="amount">{r.amt.toLocaleString()} SOL</div>
               <div className={`status ${r.st}`}>● {r.st}</div>
             </div>
           ))}
@@ -735,7 +741,7 @@ const FAQS = [
   },
   {
     q: "Which chains and tokens are supported?",
-    a: "We support USDC settlements on mainnet today, with multi-chain deployments on the near-term roadmap.",
+    a: "We settle bounties in SOL on Solana mainnet today. Multi-chain deployments are on the near-term roadmap.",
   },
   {
     q: "How much does GH Bounty cost?",
@@ -870,7 +876,19 @@ function Footer() {
           <TelegramIcon />
         </a>
       </div>
-      <div className="footer-right">© 2026 GH BOUNTY · ALL RIGHTS RESERVED</div>
+      <div className="footer-right">
+        <a
+          href="https://www.colosseum.org/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="footer-colosseum"
+          aria-label="Built for Colosseum hackathon"
+        >
+          <span>Built for</span>
+          <img src="/assets/colosseumlogo.png" alt="Colosseum" />
+        </a>
+        <span className="footer-copy">© 2026 GH BOUNTY · ALL RIGHTS RESERVED</span>
+      </div>
     </footer>
   );
 }
