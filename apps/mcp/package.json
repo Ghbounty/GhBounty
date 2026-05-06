@@ -19,7 +19,7 @@
     "@supabase/supabase-js": "^2.104.1",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
-    "@vercel/mcp-adapter": "^0.3.2",
+    "mcp-handler": "^1.1.0",
     "bcryptjs": "^3.0.3",
     "next": "16.2.4",
     "react": "19.2.4",
