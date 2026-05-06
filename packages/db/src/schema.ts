@@ -321,3 +321,64 @@ export const agentAccounts = pgTable("agent_accounts", {
     .default(sql`now()`)
     .notNull(),
 });
+
+export const apiKeys = pgTable("api_keys", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentAccountId: uuid("agent_account_id")
+    .notNull()
+    .references(() => agentAccounts.id, { onDelete: "cascade" }),
+  keyHash: text("key_hash").notNull(),
+  keyPrefix: text("key_prefix").notNull(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .default(sql`now()`)
+    .notNull(),
+});
+
+export const stakeDeposits = pgTable("stake_deposits", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentAccountId: uuid("agent_account_id")
+    .notNull()
+    .references(() => agentAccounts.id, { onDelete: "cascade" }),
+  pda: text("pda").notNull().unique(),
+  txSignature: text("tx_signature").notNull(),
+  amountLamports: bigint("amount_lamports", { mode: "bigint" }).notNull(),
+  status: stakeStatusEnum("status").notNull().default("active"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .default(sql`now()`)
+    .notNull(),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }).notNull(),
+  refundedAt: timestamp("refunded_at", { withTimezone: true }),
+  slashedAt: timestamp("slashed_at", { withTimezone: true }),
+});
+
+export const pendingTxs = pgTable("pending_txs", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentAccountId: uuid("agent_account_id")
+    .notNull()
+    .references(() => agentAccounts.id, { onDelete: "cascade" }),
+  toolName: text("tool_name").notNull(),
+  resourceId: text("resource_id"),
+  messageHash: text("message_hash").notNull(),
+  expectedSigner: text("expected_signer").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .default(sql`now()`)
+    .notNull(),
+});
+
+export const slashingEvents = pgTable("slashing_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentAccountId: uuid("agent_account_id")
+    .notNull()
+    .references(() => agentAccounts.id, { onDelete: "cascade" }),
+  eventType: text("event_type").notNull(),
+  severity: smallint("severity").notNull(),
+  evidence: jsonb("evidence").notNull(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .default(sql`now()`)
+    .notNull(),
+});
