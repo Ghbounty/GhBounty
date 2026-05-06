@@ -6,8 +6,8 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke, system_instruction};
 
 use crate::constants::{
-    BOUNTY_SEED, MAX_SCORE, MAX_URL_LEN, MIN_SCORE, MIN_STAKE_LAMPORTS, STAKE_DEPOSIT_SEED,
-    STAKE_LOCK_SECONDS, SUBMISSION_SEED,
+    BOUNTY_SEED, MAX_SCORE, MAX_URL_LEN, MIN_SCORE, MIN_STAKE_LAMPORTS, STAKE_AUTHORITY_PUBKEY,
+    STAKE_DEPOSIT_SEED, STAKE_LOCK_SECONDS, SUBMISSION_SEED,
 };
 use crate::error::EscrowError;
 use crate::state::{Bounty, BountyState, StakeDeposit, StakeStatus, Submission, SubmissionState};
@@ -172,6 +172,44 @@ pub mod ghbounty_escrow {
 
         Ok(())
     }
+
+    pub fn slash_stake_deposit(
+        ctx: Context<SlashStakeDeposit>,
+        amount: u64,
+    ) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.authority.key(),
+            STAKE_AUTHORITY_PUBKEY,
+            EscrowError::UnauthorizedStakeAuthority
+        );
+
+        let stake = &mut ctx.accounts.stake;
+        require!(
+            matches!(stake.status, StakeStatus::Active | StakeStatus::Frozen),
+            EscrowError::StakeNotActive
+        );
+        require!(amount <= stake.amount, EscrowError::SlashExceedsStake);
+
+        // Transfer lamports out of the PDA. PDAs can be debited directly
+        // (no CPI to system program) by mutating their lamport balance.
+        let stake_info = stake.to_account_info();
+        let treasury_info = ctx.accounts.treasury.to_account_info();
+        **stake_info.try_borrow_mut_lamports()? = stake_info
+            .lamports()
+            .checked_sub(amount)
+            .ok_or(EscrowError::LamportOverflow)?;
+        **treasury_info.try_borrow_mut_lamports()? = treasury_info
+            .lamports()
+            .checked_add(amount)
+            .ok_or(EscrowError::LamportOverflow)?;
+
+        stake.amount = stake.amount.checked_sub(amount).unwrap();
+        if stake.amount == 0 {
+            stake.status = StakeStatus::Slashed;
+        }
+
+        Ok(())
+    }
 }
 
 fn transfer_lamports(
@@ -308,4 +346,21 @@ pub struct InitStakeDeposit<'info> {
     pub stake: Account<'info, StakeDeposit>,
 
     pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SlashStakeDeposit<'info> {
+    pub authority: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [STAKE_DEPOSIT_SEED, stake.owner.as_ref()],
+        bump = stake.bump,
+    )]
+    pub stake: Account<'info, StakeDeposit>,
+
+    /// CHECK: lamports destination for slashed funds. Constrained off-chain
+    /// (the relayer always uses the GhBounty slash treasury account).
+    #[account(mut)]
+    pub treasury: UncheckedAccount<'info>,
 }

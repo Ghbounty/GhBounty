@@ -86,3 +86,87 @@ fn init_stake_deposit_rejects_below_minimum() {
         logs
     );
 }
+
+fn slash_ix(authority: &Pubkey, owner: &Pubkey, treasury: &Pubkey, amount: u64) -> Instruction {
+    let (stake, _) = stake_pda(owner);
+    let accounts = ghbounty_escrow::accounts::SlashStakeDeposit {
+        authority: *authority,
+        stake,
+        treasury: *treasury,
+    }
+    .to_account_metas(None);
+    let data = ghbounty_escrow::instruction::SlashStakeDeposit { amount }.data();
+    Instruction { program_id: PROGRAM_ID, accounts, data }
+}
+
+fn load_authority_keypair() -> Keypair {
+    let bytes = include_bytes!("../../../keys/stake-authority-dev.json");
+    solana_keypair::read_keypair(&mut bytes.as_ref()).expect("valid keypair JSON")
+}
+
+#[test]
+fn slash_stake_deposit_50_percent() {
+    let mut svm = setup();
+    let owner = funded(&mut svm, 1_000_000_000);
+    let treasury = Keypair::new();
+    svm.airdrop(&treasury.pubkey(), 1_000_000).unwrap();
+
+    let authority = load_authority_keypair();
+    svm.airdrop(&authority.pubkey(), 1_000_000).unwrap();
+
+    send(&mut svm, &owner, init_stake_ix(&owner.pubkey(), MIN_STAKE_LAMPORTS)).unwrap();
+
+    let half = MIN_STAKE_LAMPORTS / 2;
+    let ix = slash_ix(&authority.pubkey(), &owner.pubkey(), &treasury.pubkey(), half);
+    send(&mut svm, &authority, ix).expect("slash should succeed for authority");
+
+    let (pda, _) = stake_pda(&owner.pubkey());
+    let acct = svm.get_account(&pda).unwrap();
+    let stake = StakeDeposit::try_deserialize(&mut acct.data.as_slice()).unwrap();
+    assert_eq!(stake.amount, MIN_STAKE_LAMPORTS - half);
+    assert_eq!(stake.status, StakeStatus::Active); // partial slash keeps it active
+}
+
+#[test]
+fn slash_stake_deposit_full_marks_slashed() {
+    let mut svm = setup();
+    let owner = funded(&mut svm, 1_000_000_000);
+    let treasury = Keypair::new();
+    svm.airdrop(&treasury.pubkey(), 1_000_000).unwrap();
+
+    let authority = load_authority_keypair();
+    svm.airdrop(&authority.pubkey(), 1_000_000).unwrap();
+
+    send(&mut svm, &owner, init_stake_ix(&owner.pubkey(), MIN_STAKE_LAMPORTS)).unwrap();
+    send(
+        &mut svm,
+        &authority,
+        slash_ix(&authority.pubkey(), &owner.pubkey(), &treasury.pubkey(), MIN_STAKE_LAMPORTS),
+    )
+    .unwrap();
+
+    let (pda, _) = stake_pda(&owner.pubkey());
+    let acct = svm.get_account(&pda).unwrap();
+    let stake = StakeDeposit::try_deserialize(&mut acct.data.as_slice()).unwrap();
+    assert_eq!(stake.amount, 0);
+    assert_eq!(stake.status, StakeStatus::Slashed);
+}
+
+#[test]
+fn slash_stake_deposit_rejects_non_authority() {
+    let mut svm = setup();
+    let owner = funded(&mut svm, 1_000_000_000);
+    let imposter = funded(&mut svm, 1_000_000);
+    let treasury = Keypair::new();
+
+    send(&mut svm, &owner, init_stake_ix(&owner.pubkey(), MIN_STAKE_LAMPORTS)).unwrap();
+
+    let err = send(
+        &mut svm,
+        &imposter,
+        slash_ix(&imposter.pubkey(), &owner.pubkey(), &treasury.pubkey(), 1),
+    )
+    .expect_err("non-authority slash should fail");
+    let logs = err.meta.logs.join("\n");
+    assert!(logs.contains("UnauthorizedStakeAuthority"), "logs: {}", logs);
+}
