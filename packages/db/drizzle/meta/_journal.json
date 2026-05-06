@@ -1,1 +1,13 @@
-{"version":"7","dialect":"postgresql","entries":[]}
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778080199015,
+      "tag": "0017_mcp_agent_tables",
+      "breakpoints": true
+    }
+  ]
+}
