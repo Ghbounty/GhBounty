@@ -4,6 +4,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { CSSProperties, SVGProps } from "react";
+import { MCPSection } from "../components/MCPSection";
 
 declare global {
   interface Window {
@@ -908,6 +909,7 @@ export default function Home() {
       <LiveBounties />
       <PoweredBy />
       <Team />
+      <MCPSection />
       <Community />
       <FAQ />
       <FinalCTA />
