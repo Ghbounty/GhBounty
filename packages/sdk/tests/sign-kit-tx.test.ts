@@ -9,6 +9,7 @@ import {
   compileTransaction,
   getBase64EncodedWireTransaction,
   getTransactionDecoder,
+  blockhash,
 } from "@solana/kit";
 import { signKitTx } from "../src/sign-kit-tx";
 
@@ -17,7 +18,7 @@ describe("signKitTx", () => {
     const signer = await generateKeyPairSigner();
 
     const fakeBlockhash = {
-      blockhash: "11111111111111111111111111111111" as `${string}`,
+      blockhash: blockhash("11111111111111111111111111111111"),
       lastValidBlockHeight: 1n,
     };
 
