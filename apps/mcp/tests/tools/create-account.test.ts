@@ -105,3 +105,93 @@ describe("create_account.init handler", () => {
     vi.doUnmock("@/lib/rate-limit/upstash");
   });
 });
+
+describe("create_account.poll handler", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    process.env.MCP_TOKEN_ENCRYPTION_KEY = "x".repeat(32);
+    process.env.NEXT_PUBLIC_GAS_STATION_PUBKEY = "11111111111111111111111111111112";
+    process.env.SOLANA_RPC_URL = "https://api.devnet.solana.com";
+  });
+
+  it("returns 'pending' when GitHub still polling", async () => {
+    const { handleCreateAccountPoll } = await import(
+      "@/lib/tools/create-account/poll"
+    );
+    const { pollAccessToken, decryptAccessToken } = await import("@/lib/github/device-flow");
+    (pollAccessToken as any).mockResolvedValue({ kind: "pending" });
+    (decryptAccessToken as any).mockReturnValue("DEV_CODE_DECRYPTED");
+
+    (supabaseAdmin as any).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            single: () =>
+              Promise.resolve({
+                data: {
+                  id: "agent-uuid-1",
+                  status: "pending_oauth",
+                  wallet_pubkey: "7xK7gE8FpQrSjVz9mYwGtCkBtNvDtTvPzGjGpZqMxKqp",
+                  role: "dev",
+                  github_oauth_token_encrypted: "encrypted_device_code_b64",
+                },
+                error: null,
+              }),
+          }),
+        }),
+      }),
+    });
+
+    const result = await handleCreateAccountPoll({ account_id: "00000000-0000-0000-0000-000000000001" });
+    expect((result as any).status).toBe("pending");
+  });
+
+  it("returns NotFound when account_id doesn't exist", async () => {
+    const { handleCreateAccountPoll } = await import(
+      "@/lib/tools/create-account/poll"
+    );
+    (supabaseAdmin as any).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            single: () => Promise.resolve({ data: null, error: { message: "not found" } }),
+          }),
+        }),
+      }),
+    });
+
+    const result = await handleCreateAccountPoll({ account_id: "00000000-0000-0000-0000-000000000099" });
+    if (!("error" in result)) throw new Error("expected error");
+    expect((result as any).error.code).toBe("NotFound");
+  });
+
+  it("returns Forbidden when account already active", async () => {
+    const { handleCreateAccountPoll } = await import(
+      "@/lib/tools/create-account/poll"
+    );
+    (supabaseAdmin as any).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            single: () =>
+              Promise.resolve({
+                data: {
+                  id: "agent-1",
+                  status: "active",
+                  wallet_pubkey: "7xK...",
+                  role: "dev",
+                  github_oauth_token_encrypted: "abc",
+                },
+                error: null,
+              }),
+          }),
+        }),
+      }),
+    });
+
+    const result = await handleCreateAccountPoll({ account_id: "00000000-0000-0000-0000-000000000001" });
+    if (!("error" in result)) throw new Error("expected error");
+    // Conflict because account is already active
+    expect((result as any).error.code).toBe("Conflict");
+  });
+});
