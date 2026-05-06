@@ -378,7 +378,10 @@ export async function getBountyDisplayInfo(
 
 export type RelayerNotificationKind =
   | "submission_evaluated"
-  | "submission_auto_rejected";
+  | "submission_auto_rejected"
+  // GHB-184: cap notif kinds — issue-targeted (no submission_id).
+  | "bounty_cap_approaching"
+  | "bounty_cap_reached";
 
 export interface InsertNotificationInput {
   /** Privy DID of the recipient dev. */
@@ -413,6 +416,64 @@ export async function insertNotification(
          ${payload}::jsonb)
     `,
   );
+}
+
+/**
+ * GHB-184: heads-up at 80% of cap. Targets the company (issue-scoped).
+ */
+export async function sendCapApproachingNotif(
+  db: Db,
+  params: {
+    bountyOwnerUserId: string;
+    issueId: string;
+    bountyTitle: string | null;
+    reviewEligibleCount: number;
+    maxSubmissions: number;
+  },
+): Promise<void> {
+  const payload = JSON.stringify({
+    bountyTitle: params.bountyTitle ?? undefined,
+    reviewEligibleCount: params.reviewEligibleCount,
+    maxSubmissions: params.maxSubmissions,
+  });
+  await db.execute(sql`
+    INSERT INTO notifications (user_id, kind, submission_id, issue_id, payload)
+    VALUES (
+      ${params.bountyOwnerUserId},
+      'bounty_cap_approaching',
+      NULL,
+      ${params.issueId},
+      ${payload}::jsonb
+    )
+  `);
+}
+
+/**
+ * GHB-184: cap hit, bounty auto-closed. Targets the company.
+ */
+export async function sendCapReachedNotif(
+  db: Db,
+  params: {
+    bountyOwnerUserId: string;
+    issueId: string;
+    bountyTitle: string | null;
+    maxSubmissions: number;
+  },
+): Promise<void> {
+  const payload = JSON.stringify({
+    bountyTitle: params.bountyTitle ?? undefined,
+    maxSubmissions: params.maxSubmissions,
+  });
+  await db.execute(sql`
+    INSERT INTO notifications (user_id, kind, submission_id, issue_id, payload)
+    VALUES (
+      ${params.bountyOwnerUserId},
+      'bounty_cap_reached',
+      NULL,
+      ${params.issueId},
+      ${payload}::jsonb
+    )
+  `);
 }
 
 /**
