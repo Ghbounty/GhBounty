@@ -22,7 +22,7 @@
 2. Solana CLI 3.1.14 + Anchor 0.30.1 + Rust 1.89 (installed during Phase 0).
 3. `~/.ghbounty/github-app-credentials.json` exists locally with the GitHub App credentials registered in Phase 0.
 4. Device Flow toggle activated in https://github.com/organizations/Ghbounty/settings/apps/ghbounty-mcp (manual one-time step).
-5. Upstash account exists (free tier is fine). Two Redis databases: one for production, one for preview/dev. Both have `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` from the dashboard.
+5. **No external Upstash account needed.** Provisioned via Vercel Marketplace from inside the `ghbounty-mcp` Vercel project (Storage tab → Browse Marketplace → Upstash → Connect). Vercel manages billing through your existing Vercel account; env vars `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` are auto-injected. Configure two instances: one attached to Production env, another attached to Preview env. _The npm package `@upstash/redis` is the same — only the provisioning path is via Vercel UI._
 6. Helius Solana RPC key (free tier OK for dev, paid for production).
 
 ---
@@ -158,21 +158,23 @@ The MCP server uses a separate Supabase service-role key from the frontend's. Ro
 **Resolves:** OQ #5 in `docs/superpowers/specs/2026-05-05-ghbounty-mcp-server-design.md`
 
 ## Decision
-Use Upstash Redis (`@upstash/redis` + `@upstash/ratelimit`) for rate limiting.
+Use Upstash Redis (`@upstash/redis` + `@upstash/ratelimit`), **provisioned via Vercel Marketplace** (Project → Storage → Browse Marketplace → Upstash → Connect). NO separate Upstash account needed; Vercel manages the integration end-to-end.
 
-## Why Upstash
+## Why Upstash (provisioned via Vercel)
 - `@upstash/ratelimit` is purpose-built for serverless: sliding window, fixed window, token bucket — all atomic, all REST-based (no connection pooling issues).
 - Mature: years in production at thousands of Vercel deployments.
 - Free tier covers our v1 traffic (10K requests/day).
 - REST API works from any JS runtime (Edge, Node, browser); no socket setup.
+- **Vercel Marketplace provisioning means zero new accounts, single billing through Vercel.**
 
-## Why NOT Vercel KV
-- Newer (released 2023). Less battle-tested for rate limiting specifically.
-- Would couple our rate-limit infra to Vercel; harder to migrate if we ever leave Vercel.
-- The `@vercel/kv` package wraps Upstash Redis under the hood anyway — using Upstash directly skips a layer.
+## Why NOT pure Postgres (Supabase) rate limiting
+Considered. Pros: zero new services. Cons: needs an atomic Postgres function (sliding window with row-level locking) — non-trivial SQL, slower (30-50ms p95 vs ~5ms for Redis), risks DB connection saturation under load. Not worth the complexity for v1.
 
 ## Setup
-Each environment (preview, production) gets its own Upstash Redis instance. Env vars: `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`. Configured in Task 13.
+- Production Vercel env: connect Upstash Redis instance via Marketplace (sized "Free" or "Pay-as-you-go").
+- Preview Vercel env: connect a separate Upstash instance (or share with prod for v1 — only adds noise to metrics, doesn't break anything).
+- Vercel auto-injects `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` into the deployment env. No copy-paste of secrets.
+- Configured in Task 13 (code) + Task 32 (provisioning during deploy).
 ```
 
 - [ ] **Step 4: Commit**
@@ -3453,9 +3455,13 @@ vercel env add SUPABASE_SERVICE_ROLE_KEY production
 # NEW key — generate in Supabase dashboard, distinct from frontend's
 vercel env add SOLANA_RPC_URL production
 # Helius mainnet URL
-vercel env add UPSTASH_REDIS_REST_URL production
-# from Upstash dashboard (production DB)
-vercel env add UPSTASH_REDIS_REST_TOKEN production
+# UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN are auto-injected by
+# Vercel when you connect Upstash via the Marketplace. Skip these CLI
+# commands — instead, in the Vercel dashboard:
+#   1. Go to Project → Storage → Browse Marketplace → Upstash → Connect
+#   2. Pick "Free" plan; attach to Production env
+#   3. Repeat for Preview env (or share with prod for v1)
+# Vercel populates the env vars automatically.
 vercel env add GAS_STATION_SPONSOR_URL production
 # https://www.ghbounty.com/api/gas-station/sponsor
 vercel env add GAS_STATION_SERVICE_TOKEN production
@@ -3488,7 +3494,7 @@ Repeat the entire list for `preview` (use a separate Upstash DB for preview, but
 - `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (NEW key, distinct from frontend's)
 - `SOLANA_RPC_URL` (Helius mainnet for prod, devnet for preview)
-- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (separate DBs per env)
+- `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` — auto-injected by Vercel after connecting Upstash via Storage Marketplace (no manual entry)
 - `GAS_STATION_SPONSOR_URL` (= frontend prod URL)
 - `GAS_STATION_SERVICE_TOKEN` (NEW shared secret with frontend; add to frontend env too)
 - `NEXT_PUBLIC_GAS_STATION_PUBKEY` (= frontend's value)
@@ -3638,6 +3644,6 @@ After implementation, run through before opening the PR:
 
 ## Estimated effort
 
-5-7 days for one engineer who already has the env set up (Phase 0 done, GitHub App registered, Upstash account ready). Tasks 19-24 (the 3 onboarding tools with their tx-building) are the long stretch.
+5-7 days for one engineer who already has the env set up (Phase 0 done, GitHub App registered). Upstash KV provisioning happens during Task 32 via the Vercel UI — no extra account creation needed. Tasks 19-24 (the 3 onboarding tools with their tx-building) are the long stretch.
 
 If unfamiliar with `@vercel/mcp-adapter` and `@solana/kit` 6.x: pad to 8-10 days. The Codama-generated builders may need adapter calls that the spec didn't anticipate.
