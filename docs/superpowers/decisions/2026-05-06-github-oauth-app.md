@@ -1,29 +1,33 @@
 # Decision — GitHub OAuth App for MCP Device Flow
 
 **Date:** 2026-05-06
-**Status:** Deferred (blocked on org owner permissions)
+**Status:** ✅ Accepted (registered same-day)
 **Resolves:** Phase 0 deliverable #4 (`docs/superpowers/specs/2026-05-05-ghbounty-mcp-server-design.md` section 12)
 
-## Decision (intent)
+## Decision
 
-Register a **GitHub App** (not an OAuth App — modern, finer-grained permissions) under the `Ghbounty` org with these settings:
+Registered a **GitHub App** (not an OAuth App — modern, finer-grained permissions) under the `Ghbounty` org via the App Manifest flow.
 
 | Field | Value |
 |---|---|
 | App name | `GhBounty MCP` |
-| Description | OAuth Device Flow for AI agents signing up to GhBounty MCP server |
+| Slug | `ghbounty-mcp` |
+| App ID | `3623568` |
+| Client ID | `Iv23liabu10KaQEjpH9w` (public; ships in env) |
+| Settings page | https://github.com/apps/ghbounty-mcp |
+| Owner | `Ghbounty` org |
 | Homepage URL | `https://www.ghbounty.com` |
 | Callback URL | `https://mcp.ghbounty.com/api/oauth/github/callback` (placeholder; Device Flow doesn't redirect, but the field is required) |
 | Webhook | Disabled |
-| Permissions → Account → Email addresses | Read |
-| Permissions → Account → Profile | Read |
-| Where can it be installed? | "Only on this account" |
-| **Device Flow** | **Enabled** |
+| Default permissions | None (Device Flow grants `read:user` + `user:email` user-level scopes; no app-level repo/org permissions needed) |
+| Where it can be installed | "Only on this account" (the `Ghbounty` org) |
 
-After registration, capture:
-- App ID
-- Client ID (public — ships in env)
-- Client Secret (private — production env only, store in 1Password)
+The Client Secret + private key (PEM) + webhook_secret are stored in `~/.ghbounty/github-app-credentials.json` on the developer machine that registered the app (mode 0600). They must be transferred to:
+
+- **Vercel env vars** on the `apps/mcp` project (Phase 1, both Production and Preview):
+  - `GITHUB_OAUTH_CLIENT_ID=Iv23liabu10KaQEjpH9w`
+  - `GITHUB_OAUTH_CLIENT_SECRET=<from credentials file>`
+- **1Password / shared password manager** for the team — under a `GhBounty MCP` vault entry containing all three secrets (client_secret, pem, webhook_secret) for backup.
 
 ## Why GitHub App, not OAuth App
 GitHub Apps have finer permissions, faster token rotation, and aren't deprecated. OAuth Apps are legacy.
@@ -31,14 +35,21 @@ GitHub Apps have finer permissions, faster token rotation, and aren't deprecated
 ## Why Device Flow
 Per spec section 7: agentic onboarding cannot use redirect-based OAuth — there's no browser to redirect from. Device Flow is the same mechanism `gh auth login` uses.
 
-## Status — pending action items
+## Manual follow-up needed (one-time)
 
-- [ ] **Tomi (org owner)**: either (a) promote Arturo to org owner, OR (b) register the GitHub App himself and share credentials via 1Password.
-- [ ] Once registered: capture App ID, Client ID, Client Secret
-- [ ] Add credentials to Vercel env vars on the `apps/mcp` project (Phase 1 task)
-- [ ] Update this doc to "Accepted" status with the captured App ID and link to the app's GitHub settings page
+- [ ] **Enable Device Flow** in the app settings: visit https://github.com/organizations/Ghbounty/settings/apps/ghbounty-mcp → "Identifying and authorizing users" → tick **"Enable Device Flow"** → Save. _(The Manifest API doesn't expose this toggle, so it must be done via UI.)_
+- [ ] Add `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` to the Vercel `apps/mcp` project env vars when Phase 1 deploys.
+- [ ] Copy `client_secret`, `pem`, `webhook_secret` to 1Password under a `GhBounty MCP` entry; then it's safe to delete `~/.ghbounty/github-app-credentials.json` from the registering developer's machine.
 
-## Why deferred
-Arturo's role in the `Ghbounty` org is `member` (not `owner`), so attempting to create a GitHub App on the org settings page returned 404. Workaround for the demo could be a personal-account app + transfer-to-org later, but cleanest path is to wait for owner promotion (~1 day) and avoid the transfer step.
+## Registration tooling
 
-Phase 0's MCP server doesn't actually use these credentials yet — Phase 1 (onboarding flow) is when `create_account.poll` calls `https://github.com/login/oauth/access_token` with `device_code`. So this deferral does NOT block Phase 0 from shipping; it only needs to be resolved before Phase 1 implementation begins.
+A one-shot Manifest-flow helper script lived at `/tmp/mcp-app-creator/server.mjs` (`/tmp` is volatile, so the file is no longer present). For future reference, it:
+
+1. Generates the manifest JSON with all values above.
+2. Spins up a local HTTP server on port 8765.
+3. Auto-opens the browser to a self-submitting form that POSTs the manifest to `https://github.com/organizations/Ghbounty/settings/apps/new`.
+4. Captures the post-creation `code` query param at the redirect (`http://localhost:8765/cb`).
+5. Exchanges the code via `POST https://api.github.com/app-manifests/{code}/conversions` for the full credentials.
+6. Writes the response to `~/.ghbounty/github-app-credentials.json` (mode 0600).
+
+This script isn't reusable — the App is permanent and only needs rotating, not re-creating. Rotation = generate a new client_secret in the app's settings page.
