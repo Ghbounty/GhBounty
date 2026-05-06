@@ -5,6 +5,7 @@ import { registerCreateAccountComplete } from "./create-account/complete";
 import { registerWhoami } from "./whoami";
 import { registerBountiesList } from "./bounties/list";
 import { registerBountiesGet } from "./bounties/get";
+import { registerSubmissionsGet } from "./submissions/get";
 
 export async function registerAllTools(server: McpServer): Promise<void> {
   registerCreateAccountInit(server);
@@ -13,4 +14,5 @@ export async function registerAllTools(server: McpServer): Promise<void> {
   registerWhoami(server);
   registerBountiesList(server);
   registerBountiesGet(server);
+  registerSubmissionsGet(server);
 }
