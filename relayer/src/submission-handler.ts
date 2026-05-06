@@ -10,9 +10,13 @@ import {
   getSubmittedByUserId,
   insertEvaluation,
   insertNotification,
+  isBountyOpenForSubmissions,
   markAutoRejected,
-  markScored,
+  markCapWarningSent,
+  markScoredAndCheckCap,
   recomputeRanking,
+  sendCapApproachingNotif,
+  sendCapReachedNotif,
   upsertAutoRejectReview,
   upsertSubmission,
 } from "./db/ops.js";
@@ -112,6 +116,25 @@ export async function handleSubmission(
       prUrl: sub.prUrl,
       opusReportHashHex: Buffer.from(sub.opusReportHash).toString("hex"),
     });
+
+    // GHB-184: bail before Opus when the bounty was already closed by cap
+    // (or cancelled on-chain). Saves an inference call and matches the
+    // user-visible state ("Cap reached" → no scoring).
+    const open = await isBountyOpenForSubmissions(deps.db, sub.bounty.toBase58());
+    if (!open) {
+      log.info("submission arrived after cap or closure; skipping scoring", {
+        submission: sub.pda.toBase58(),
+        bounty: sub.bounty.toBase58(),
+      });
+      await markAutoRejected(deps.db, sub.pda.toBase58());
+      return {
+        score: 0,
+        outcome: "auto_rejected",
+        threshold: null,
+        source: "stub",
+        txHash: "skipped-bounty-closed",
+      };
+    }
   }
 
   // GHB-98: pull company-defined evaluation criteria before analyzing so the
@@ -172,7 +195,72 @@ export async function handleSubmission(
       });
       await markAutoRejected(deps.db, sub.pda.toBase58());
     } else {
-      await markScored(deps.db, sub.pda.toBase58());
+      // GHB-184: atomic claim. The CTE bumps review_eligible_count and (if
+      // we just hit the cap) stamps closed_by_cap_at. A race-loser receives
+      // applied=false; we then auto_reject so the dev sees a coherent outcome.
+      const cap = await markScoredAndCheckCap(
+        deps.db,
+        sub.pda.toBase58(),
+        sub.bounty.toBase58(),
+      );
+      if (!cap.applied) {
+        log.info("cap reached; submission auto_rejected post-scoring", {
+          submission: sub.pda.toBase58(),
+          bounty: sub.bounty.toBase58(),
+        });
+        await markAutoRejected(deps.db, sub.pda.toBase58());
+        outcome = "auto_rejected";
+      } else if (
+        cap.justClosed &&
+        cap.bountyOwnerUserId &&
+        cap.issueId &&
+        typeof cap.maxSubmissions === "number"
+      ) {
+        log.info("bounty closed by cap", {
+          bounty: sub.bounty.toBase58(),
+          max: cap.maxSubmissions,
+        });
+        try {
+          await sendCapReachedNotif(deps.db, {
+            bountyOwnerUserId: cap.bountyOwnerUserId,
+            issueId: cap.issueId,
+            bountyTitle: cap.bountyTitle ?? null,
+            maxSubmissions: cap.maxSubmissions,
+          });
+        } catch (err) {
+          log.warn("cap_reached notif failed", {
+            bounty: sub.bounty.toBase58(),
+            err: String(err),
+          });
+        }
+      } else if (
+        cap.applied &&
+        typeof cap.maxSubmissions === "number" &&
+        cap.maxSubmissions > 0 &&
+        cap.capWarningSentAt === null &&
+        typeof cap.reviewEligibleCount === "number" &&
+        cap.reviewEligibleCount >= Math.ceil(cap.maxSubmissions * 0.8) &&
+        cap.reviewEligibleCount < cap.maxSubmissions &&
+        cap.bountyOwnerUserId &&
+        cap.issueId
+      ) {
+        // 80% crossed for the first time. Ping the company once.
+        try {
+          await sendCapApproachingNotif(deps.db, {
+            bountyOwnerUserId: cap.bountyOwnerUserId,
+            issueId: cap.issueId,
+            bountyTitle: cap.bountyTitle ?? null,
+            reviewEligibleCount: cap.reviewEligibleCount,
+            maxSubmissions: cap.maxSubmissions,
+          });
+          await markCapWarningSent(deps.db, cap.issueId);
+        } catch (err) {
+          log.warn("cap_approaching notif failed", {
+            bounty: sub.bounty.toBase58(),
+            err: String(err),
+          });
+        }
+      }
     }
   }
 

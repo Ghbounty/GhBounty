@@ -90,6 +90,169 @@ export async function markScored(
 }
 
 /**
+ * GHB-184: claim a "review-eligible" slot atomically.
+ *
+ * Increments `issues.review_eligible_count` and (if the new count reaches
+ * `bounty_meta.max_submissions`) sets `bounty_meta.closed_by_cap_at` in the
+ * SAME statement. The WHERE clause guarantees that two concurrent submissions
+ * landing at `count = max - 1` can't both succeed: the loser sees `applied:
+ * false` and the caller falls back to `markAutoRejected`.
+ *
+ * `issues.state` is intentionally untouched — it mirrors on-chain reality.
+ * The "closed by cap" signal lives entirely in `bounty_meta.closed_by_cap_at`.
+ *
+ * Caller still needs to mark the submission as `scored` after a successful
+ * claim; this helper only enforces the cap rule.
+ */
+export interface CapCheckResult {
+  /** True when the slot was claimed. False = bounty already closed/full. */
+  applied: boolean;
+  /** UUID of `issues.id` (for `notifications.issue_id`, which is uuid). */
+  issueId?: string;
+  /** New `review_eligible_count` after the increment. */
+  reviewEligibleCount?: number;
+  /** Cap value at the moment of the UPDATE; null = unlimited. */
+  maxSubmissions?: number | null;
+  /** Previous `cap_warning_sent_at`; null means we haven't sent the 80% notif yet. */
+  capWarningSentAt?: Date | null;
+  /** True when this UPDATE is the one that crossed `count >= max`. */
+  justClosed?: boolean;
+  /** Privy DID of the company that owns the bounty (notif recipient). */
+  bountyOwnerUserId?: string | null;
+  /** Bounty title for notif payloads. */
+  bountyTitle?: string | null;
+}
+
+export async function markScoredAndCheckCap(
+  db: Db,
+  submissionPda: string,
+  issuePda: string,
+): Promise<CapCheckResult> {
+  // CTE pattern (Option B):
+  //   1. `bumped` increments review_eligible_count when the bounty is open
+  //      to more PRs. Failure (closed_by_cap_at IS NOT NULL or count == max)
+  //      yields no row.
+  //   2. `closed` sets bounty_meta.closed_by_cap_at when the new count meets
+  //      or exceeds max — runs only if `bumped` produced a row.
+  //   3. Final SELECT returns the bumped row plus a `just_closed` flag.
+  const result = await db.execute(sql`
+    WITH bumped AS (
+      UPDATE issues i
+      SET review_eligible_count = i.review_eligible_count + 1
+      FROM bounty_meta bm
+      WHERE i.pda = ${issuePda}
+        AND bm.issue_id = i.id
+        AND i.state = 'open'
+        AND bm.closed_by_cap_at IS NULL
+        AND (bm.max_submissions IS NULL
+             OR i.review_eligible_count < bm.max_submissions)
+      RETURNING
+        i.id AS issue_id,
+        i.review_eligible_count AS review_eligible_count,
+        bm.max_submissions AS max_submissions,
+        bm.cap_warning_sent_at AS cap_warning_sent_at,
+        bm.created_by_user_id AS bounty_owner_user_id,
+        bm.title AS bounty_title
+    ),
+    closed AS (
+      UPDATE bounty_meta bm
+      SET closed_by_cap_at = now()
+      FROM bumped b
+      WHERE bm.issue_id = b.issue_id
+        AND b.max_submissions IS NOT NULL
+        AND b.review_eligible_count >= b.max_submissions
+      RETURNING bm.issue_id
+    )
+    SELECT
+      b.issue_id,
+      b.review_eligible_count,
+      b.max_submissions,
+      b.cap_warning_sent_at,
+      b.bounty_owner_user_id,
+      b.bounty_title,
+      EXISTS(SELECT 1 FROM closed c WHERE c.issue_id = b.issue_id) AS just_closed
+    FROM bumped b
+  `);
+
+  type Row = {
+    issue_id: string;
+    review_eligible_count: number;
+    max_submissions: number | null;
+    cap_warning_sent_at: string | null;
+    bounty_owner_user_id: string | null;
+    bounty_title: string | null;
+    just_closed: boolean;
+  };
+  const list = (result as unknown as { rows?: Row[] }).rows;
+  const flat = Array.isArray(result) ? (result as unknown as Row[]) : list ?? [];
+  const first = flat[0];
+
+  if (!first) {
+    return { applied: false };
+  }
+
+  // Slot claimed — flip the submission to 'scored'. Done as a separate
+  // UPDATE because submissions has no FK relationship that we can leverage
+  // inside the CTE atomically.
+  await db
+    .update(submissions)
+    .set({ state: "scored", scoredAt: sql`now()` })
+    .where(sql`${submissions.pda} = ${submissionPda}`);
+
+  return {
+    applied: true,
+    issueId: first.issue_id,
+    reviewEligibleCount: first.review_eligible_count,
+    maxSubmissions: first.max_submissions,
+    capWarningSentAt: first.cap_warning_sent_at
+      ? new Date(first.cap_warning_sent_at)
+      : null,
+    bountyOwnerUserId: first.bounty_owner_user_id,
+    bountyTitle: first.bounty_title,
+    justClosed: first.just_closed,
+  };
+}
+
+/**
+ * GHB-184: pre-check before scoring. The bounty accepts new submissions only
+ * when on-chain state is 'open' AND the off-chain cap hasn't been hit. False
+ * means the caller should mark the submission auto_rejected and skip Opus.
+ */
+export async function isBountyOpenForSubmissions(
+  db: Db,
+  issuePda: string,
+): Promise<boolean> {
+  const rows = await db.execute(sql`
+    SELECT i.state AS state, bm.closed_by_cap_at AS closed_by_cap_at
+      FROM issues i
+      JOIN bounty_meta bm ON bm.issue_id = i.id
+     WHERE i.pda = ${issuePda}
+     LIMIT 1
+  `);
+  type Row = { state: string; closed_by_cap_at: string | null };
+  const list = (rows as unknown as { rows?: Row[] }).rows;
+  const flat = Array.isArray(rows) ? (rows as unknown as Row[]) : list ?? [];
+  const first = flat[0];
+  if (!first) return true; // no row yet (mock/legacy) — let it through
+  return first.state === "open" && first.closed_by_cap_at === null;
+}
+
+/**
+ * GHB-184: stamp `cap_warning_sent_at` so the relayer never emits the 80%
+ * notif twice for the same bounty.
+ */
+export async function markCapWarningSent(
+  db: Db,
+  issueId: string,
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE bounty_meta
+    SET cap_warning_sent_at = now()
+    WHERE issue_id = ${issueId}
+  `);
+}
+
+/**
  * GHB-95: mark a submission as auto-rejected off-chain (score below the
  * issue's reject threshold). Onchain `set_score` is still expected to have
  * run for transparency; this only affects the off-chain UI state.

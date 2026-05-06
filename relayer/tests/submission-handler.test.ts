@@ -37,18 +37,53 @@ interface FakeDb {
   thresholdToReturn: number | null;
   criteriaToReturn: string | null;
   rankingRowsToReturn: RankingRow[];
+  /**
+   * GHB-184: queue of fake `execute` results, consumed in order. Each entry
+   * is the rows array the next `db.execute(sql...)` call should resolve to.
+   * If the queue is empty when execute fires, it resolves to []. The fake
+   * routes by SQL snippet so tests don't need to enumerate the order
+   * across the whole pipeline (pre-check, cap UPDATE, mark warning, etc.).
+   */
+  executeRoutes: Array<{ match: RegExp; rows: unknown[] }>;
 }
 
 function fakeDb(opts: {
   threshold?: number | null;
   criteria?: string | null;
   rankingRows?: RankingRow[];
+  /** Override default routes. Custom routes take precedence over defaults. */
+  executeRoutes?: Array<{ match: RegExp; rows: unknown[] }>;
 } = {}): FakeDb {
+  // GHB-184: defaults for the new execute-based helpers so the pre-existing
+  // threshold tests still pass without each one configuring cap fixtures.
+  // Pre-check defaults to "bounty is open"; cap UPDATE defaults to "applied,
+  // no cap" so markScoredAndCheckCap acts like the old markScored.
+  const defaults: Array<{ match: RegExp; rows: unknown[] }> = [
+    {
+      match: /SELECT i\.state[\s\S]+FROM issues/i,
+      rows: [{ state: "open", closed_by_cap_at: null }],
+    },
+    {
+      match: /WITH bumped AS/i,
+      rows: [
+        {
+          issue_id: "00000000-0000-0000-0000-000000000000",
+          review_eligible_count: 1,
+          max_submissions: null,
+          cap_warning_sent_at: null,
+          bounty_owner_user_id: null,
+          bounty_title: null,
+          just_closed: false,
+        },
+      ],
+    },
+  ];
   return {
     calls: [],
     thresholdToReturn: opts.threshold ?? null,
     criteriaToReturn: opts.criteria ?? null,
     rankingRowsToReturn: opts.rankingRows ?? [],
+    executeRoutes: [...(opts.executeRoutes ?? []), ...defaults],
   };
 }
 
@@ -124,11 +159,38 @@ function buildDrizzleProxy(state: FakeDb): unknown {
     }),
   });
 
+  // GHB-184: drizzle's `sql` template returns an SQL object; `db.execute`
+  // accepts it. We stringify the queryChunks (a mix of strings + parameter
+  // markers) and route to the first matching test route. Recording the call
+  // also lets tests assert which path executed.
+  const execute = async (sqlObj: unknown) => {
+    const text = sqlToString(sqlObj);
+    state.calls.push({ kind: "execute", payload: text });
+    const route = state.executeRoutes.find((r) => r.match.test(text));
+    const rows = route?.rows ?? [];
+    // Drizzle drivers vary: postgres-js exposes `.rows`; others spread an
+    // array. Return both shapes so the helpers' fallback logic finds rows
+    // either way.
+    return Object.assign([...rows], { rows });
+  };
+
   return {
     insert: insertChain,
     update: updateChain,
     select: selectChain,
+    execute,
   };
+}
+
+/** Best-effort SQL stringifier for the test proxy. Drizzle's SQL template
+ * exposes `queryChunks` (mix of strings + Param objects). We just join the
+ * string parts so we can pattern-match on stable SQL keywords. */
+function sqlToString(sqlObj: unknown): string {
+  const chunks = (sqlObj as { queryChunks?: unknown[] })?.queryChunks;
+  if (!Array.isArray(chunks)) return String(sqlObj);
+  return chunks
+    .map((c) => (typeof c === "object" && c && "value" in c ? String((c as { value: unknown }).value) : String(c)))
+    .join(" ");
 }
 
 // Build a fake DecodedSubmission. We use freshly generated keypairs because
@@ -912,5 +974,226 @@ describe("handleSubmission", () => {
     });
     expect(runSandbox).not.toHaveBeenCalled();
     expect(analyze.mock.calls[0]![0].testResult).toBeNull();
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────────────
+ * GHB-184: cap de submissions (off-chain).
+ *
+ * The atomic UPDATE pattern lives in `markScoredAndCheckCap`. We exercise
+ * it through `handleSubmission` so we also assert that the surrounding
+ * orchestration (skip-on-closed pre-check, fallback to auto_rejected on
+ * race-loss, cap_reached / cap_approaching notif emission) all fire on
+ * the right edges. The fakeDb's executeRoutes mechanism lets each test
+ * configure exactly the SQL responses the handler will see.
+ * ────────────────────────────────────────────────────────────────────── */
+describe("GHB-184: cap de submissions", () => {
+  const ISSUE_UUID = "11111111-1111-1111-1111-111111111111";
+  const OWNER_DID = "did:privy:owner";
+
+  // Helper: a cap UPDATE response shaped like the production CTE returns.
+  function capRow(p: {
+    reviewEligibleCount: number;
+    maxSubmissions: number | null;
+    capWarningSentAt?: string | null;
+    justClosed?: boolean;
+  }) {
+    return {
+      issue_id: ISSUE_UUID,
+      review_eligible_count: p.reviewEligibleCount,
+      max_submissions: p.maxSubmissions,
+      cap_warning_sent_at: p.capWarningSentAt ?? null,
+      bounty_owner_user_id: OWNER_DID,
+      bounty_title: "My bounty",
+      just_closed: p.justClosed ?? false,
+    };
+  }
+
+  test("pre-check: bounty already closed by cap → skip Opus + auto_reject", async () => {
+    const state = fakeDb({
+      executeRoutes: [
+        {
+          // Pre-check sees the bounty as closed-by-cap.
+          match: /SELECT i\.state[\s\S]+FROM issues/i,
+          rows: [{ state: "open", closed_by_cap_at: "2026-05-06T00:00:00Z" }],
+        },
+      ],
+    });
+    const db = buildDrizzleProxy(state);
+    const { client, setScore } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    const r = await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    expect(analyze).not.toHaveBeenCalled();
+    expect(setScore).not.toHaveBeenCalled();
+    expect(r.outcome).toBe("auto_rejected");
+    expect(r.txHash).toBe("skipped-bounty-closed");
+
+    // Submission was marked auto_rejected via the existing markAutoRejected
+    // path (drizzle update, recorded as kind="update").
+    const updates = state.calls.filter((c) => c.kind === "update");
+    expect(updates.some((u) => {
+      const patch = (u.payload as { patch: { state?: string } }).patch;
+      return patch?.state === "auto_rejected";
+    })).toBe(true);
+  });
+
+  test("scored bumps review_eligible_count when bounty stays open", async () => {
+    const state = fakeDb({
+      executeRoutes: [
+        {
+          match: /WITH bumped AS/i,
+          rows: [capRow({ reviewEligibleCount: 3, maxSubmissions: 5 })],
+        },
+      ],
+    });
+    const db = buildDrizzleProxy(state);
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    const r = await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    expect(r.outcome).toBe("pass");
+    // Atomic UPDATE was issued.
+    const executes = state.calls.filter((c) => c.kind === "execute");
+    expect(executes.some((e) => /WITH bumped AS/i.test(String(e.payload)))).toBe(true);
+    // No cap_reached notif (just_closed=false): the UPDATE that sends it is
+    // an INSERT INTO notifications statement we'd see in the calls list.
+    expect(executes.some((e) => /'bounty_cap_reached'/i.test(String(e.payload)))).toBe(false);
+  });
+
+  test("hitting the cap closes the bounty and emits cap_reached notif", async () => {
+    const state = fakeDb({
+      executeRoutes: [
+        {
+          match: /WITH bumped AS/i,
+          rows: [
+            capRow({
+              reviewEligibleCount: 3,
+              maxSubmissions: 3,
+              justClosed: true,
+            }),
+          ],
+        },
+      ],
+    });
+    const db = buildDrizzleProxy(state);
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    const executes = state.calls.filter((c) => c.kind === "execute");
+    // cap_reached notif emitted.
+    expect(executes.some((e) => /'bounty_cap_reached'/i.test(String(e.payload)))).toBe(true);
+    // No cap_approaching (we jumped straight to close).
+    expect(executes.some((e) => /'bounty_cap_approaching'/i.test(String(e.payload)))).toBe(false);
+  });
+
+  test("race-lost (applied=false) → auto_reject + no notif", async () => {
+    const state = fakeDb({
+      executeRoutes: [
+        {
+          // Empty rows = the WHERE didn't match (cap already filled by a
+          // concurrent submission).
+          match: /WITH bumped AS/i,
+          rows: [],
+        },
+      ],
+    });
+    const db = buildDrizzleProxy(state);
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    const r = await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    // Outcome flips to auto_rejected because the slot couldn't be claimed.
+    expect(r.outcome).toBe("auto_rejected");
+    const updates = state.calls.filter((c) => c.kind === "update");
+    expect(updates.some((u) => {
+      const patch = (u.payload as { patch: { state?: string } }).patch;
+      return patch?.state === "auto_rejected";
+    })).toBe(true);
+    // No cap notifs.
+    const executes = state.calls.filter((c) => c.kind === "execute");
+    expect(executes.some((e) => /'bounty_cap_reached'/i.test(String(e.payload)))).toBe(false);
+    expect(executes.some((e) => /'bounty_cap_approaching'/i.test(String(e.payload)))).toBe(false);
+  });
+
+  test("first crossing of 80% → emits cap_approaching + stamps cap_warning_sent_at", async () => {
+    const state = fakeDb({
+      executeRoutes: [
+        {
+          match: /WITH bumped AS/i,
+          // 4/5 = 80% on the dot, capWarningSentAt still null.
+          rows: [capRow({ reviewEligibleCount: 4, maxSubmissions: 5 })],
+        },
+      ],
+    });
+    const db = buildDrizzleProxy(state);
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => opusResult);
+
+    await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    const executes = state.calls.filter((c) => c.kind === "execute");
+    expect(executes.some((e) => /'bounty_cap_approaching'/i.test(String(e.payload)))).toBe(true);
+    // The flag UPDATE fires right after the notif so the next submission
+    // doesn't double-notify.
+    expect(executes.some((e) => /SET cap_warning_sent_at = now\(\)/i.test(String(e.payload)))).toBe(true);
+  });
+
+  test("auto_rejected by threshold → no cap UPDATE (counter untouched)", async () => {
+    const state = fakeDb({
+      threshold: 8,
+      executeRoutes: [
+        {
+          // The pre-check still runs; the cap UPDATE must NOT.
+          match: /WITH bumped AS/i,
+          rows: [capRow({ reviewEligibleCount: 99, maxSubmissions: 5 })],
+        },
+      ],
+    });
+    const db = buildDrizzleProxy(state);
+    const { client } = buildScorer();
+    const analyze = vi.fn(async () => lowOpusResult); // score=3 < threshold=8
+
+    const r = await handleSubmission(buildSub(), {
+      ...baseDeps,
+      db: db as never,
+      scorer: client,
+      analyze,
+    });
+
+    expect(r.outcome).toBe("auto_rejected");
+    const executes = state.calls.filter((c) => c.kind === "execute");
+    // Cap UPDATE never ran — threshold rejection short-circuits before it.
+    expect(executes.some((e) => /WITH bumped AS/i.test(String(e.payload)))).toBe(false);
   });
 });
