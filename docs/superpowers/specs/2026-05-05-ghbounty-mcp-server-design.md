@@ -248,7 +248,7 @@ pub const STAKE_LOCK_DAYS: i64 = 14;
 |---|---|---|
 | `bounties.prepare_create` | `{ github_issue_url, amount_sol, criteria, release_mode: "auto", reject_threshold? }` | `{ bounty_meta_id, tx_to_sign_b64, expected_*, total_cost_sol }` |
 | `bounties.submit_signed_create` | `{ bounty_meta_id, signed_tx_b64 }` | `{ bounty_id, pda, tx_hash }` |
-| `bounties.prepare_cancel` | `{ bounty_id }` | `{ tx_to_sign_b64, expected_*, refund_amount_sol }` |
+| `bounties.prepare_cancel` | `{ bounty_id }` | `{ tx_to_sign_b64, expected_*, refund_amount_sol }` — _precondition_: rejects with `Conflict (409)` if the bounty has any submissions confirmed on-chain (`submission_count > 0`). Aligned with GHB-183. |
 | `bounties.submit_signed_cancel` | `{ signed_tx_b64 }` | `{ bounty_id, refund_tx_hash }` |
 | `bounties.list_mine` | `{ filter?, cursor? }` | `{ items, next_cursor }` |
 | `bounties.list_submissions` | `{ bounty_id }` | `{ items: [{ submission_id, solver, pr_url, score, status }] }` |
@@ -371,29 +371,24 @@ Before RPC submit, MCP verifies (all-or-nothing):
 5. Idempotency: if `pending_txs.consumed_at` is set, returns the cached result
 6. RPC submit with `commitment: 'confirmed'`. Anchor errors decoded with IDL → `ProgramError { code, name, message }`
 
-### Gas-station integration (Tomi GHB-176)
+### Gas-station integration (already shipped — GHB-172..177, GHB-180)
 
-```ts
-const agentSolBalance = await rpc.getBalance(agentPubkey);
-const useGasStation = agentSolBalance < 1_000_000n;  // < 0.001 SOL
+The gas-station landed in main on 2026-05-05 (PR #58). Implementation in:
+- `packages/shared/src/gas-station/` — `types.ts` (chain-agnostic interface), `solana-validator.ts` (anti-abuse rules), `solana.ts` (`SolanaGasStation` impl)
+- `frontend/app/api/gas-station/sponsor/route.ts` — POST endpoint, Privy-authenticated
+- `frontend/lib/gas-station-client.ts` — frontend helper (`submitSponsoredTx`)
 
-const message = pipe(
-  createTransactionMessage({ version: 0 }),
-  m => setTransactionMessageFeePayer(useGasStation ? gasStationPubkey : agentPubkey, m),
-  m => setTransactionMessageLifetimeUsingBlockhash(blockhash, m),
-  m => appendTransactionMessageInstructions(instructions, m),
-);
+**The MCP server reuses this exact infrastructure.** Concretely:
+1. MCP `prepare_*` tool builds the message with `feePayer = GAS_STATION_PUBKEY` (read from env, same value as the frontend uses).
+2. MCP partial-signs as nothing — the gas-station signs at submit time, not build time. So `tx_to_sign_b64` returned to the agent is _unsigned_ from the agent's perspective, but pinned to the gas-station fee payer.
+3. Agent signs locally with `@solana/kit`.
+4. MCP `submit_signed_*` tool POSTs the signed tx to `/api/gas-station/sponsor` (same internal route the frontend uses), which validates + signs as fee payer + submits.
 
-if (useGasStation) {
-  // Gas-station relayer signs as fee payer (partial signature)
-  const partialSigned = await partiallySignTransactionMessageWithSigners(message, [gasStationSigner]);
-  return getBase64EncodedWireTransaction(partialSigned);
-}
+**GHB-180 rent topup**: in addition to paying network fee, the gas-station bundles a `SystemProgram.transfer` of **5,000,000 lamports** (~0.005 SOL) to the agent's wallet right before any `submit_solution` ix. This covers the Submission account rent (~0.00315 SOL) plus a small buffer. **Net effect: agent can start with literally 0 SOL and successfully submit PRs.**
 
-return getBase64EncodedWireTransaction(compileTransaction(message));
-```
+**Validator allowlist** (from `solana-validator.ts`): only sponsors txs whose ix discriminator is in `{ create_bounty, submit_solution, resolve_bounty, cancel_bounty }`. The MCP must use exactly these 4 instructions — anything else gets rejected by the gas-station before signing.
 
-**Implication**: agent can start with **0 SOL** in their wallet — only needs SOL for the stake (0.035 ≈ $3) and for submission rent (~0.00315 ≈ $0.27 per PR, since `submit_solution` inits a Submission account with `payer = solver`). Gas fees (the actual `getRecentPrioritizationFees`-based microlamports) are sponsored when wallet is below threshold.
+**Implication**: agent can start with **0 SOL** in their wallet. The stake (0.035 SOL ≈ $3) is the only out-of-pocket cost. Network fees + submission rent + bounty creation rent are all sponsored.
 
 ### Error model (returned via MCP errors / HTTP status codes)
 
@@ -602,11 +597,13 @@ This SDK keeps the public quickstart at ~10 lines.
 |---|---|---|---|
 | 1 | `AUTHORITY_PUBKEY` for slash/refund — same as existing release authority, or new dedicated key? | TBD | Phase 0 |
 | 2 | `@vercel/mcp-adapter` stability — currently in beta. Acceptable to depend on? | TBD | Phase 1 kickoff |
-| 3 | Gas-station availability (GHB-176/177 by Tomi) — what's the merge ETA? Block Phase 1 if not ready, or fallback to "agent must fund $1 of SOL manually"? | Tomi | Phase 1 kickoff |
+| 3 | ~~Gas-station availability (GHB-176/177 by Tomi)~~ **RESOLVED 2026-05-05**: PR #58 merged with full gas-station + GHB-180 rent topup. MCP integration described in section 8. | Tomi | ✅ Done |
 | 4 | Vercel project for `ghbounty-mcp` — same team `weareghbounty-6269`, or isolated team for security? | Arturo | Phase 1 |
 | 5 | Upstash Redis vs Vercel KV for rate limiting — cost/latency comparison | TBD | Phase 1 |
 | 6 | What does the home page MCPSection mockup *visually* look like — visual companion needed? | Arturo | Phase 4 |
-| 7 | **Submission account rent (pre-existing program issue, watch-but-not-blocking)** — `submit_solution` at `contracts/solana/programs/ghbounty_escrow/src/lib.rs:190` inits a Submission account with `payer = solver`. Struct totals 324 bytes (8 disc + 316 data) → rent-exempt = (324 + 128) × 3480 × 2 = 3,145,920 lamports ≈ 0.00315 SOL. **At SOL ≈ $86.72: ~$0.27 per submission** — trivial. `resolve_bounty` / `cancel_bounty` never close the Submission accounts, so this rent is permanently locked, but at current prices it's a rounding error. **Becomes a problem if SOL pumps 30x+ ($2500+/SOL → $7+/PR rent)**: at that point evaluate (a) shrinking the Submission struct, (b) bounty creator pre-funding a slot pool with refund-on-resolve, or (c) Light Protocol ZK Compression. _v1 ships as-is._ | Tomi + Arturo (only if SOL price changes drastically) | Monitor, not blocking |
+| 7 | ~~**Submission account rent**~~ **RESOLVED 2026-05-05**: GHB-180 ships a 5M lamports topup transfer bundled in every `submit_solution` sponsored tx, covering the ~0.00315 SOL rent. Agent can submit with 0 SOL. _If SOL pumps 30x+, revisit by raising the topup amount (one-line config change in `gas-station/solana.ts`)._ | Tomi | ✅ Done |
+| 10 | **GHB-182: PR ownership validation** — Gaston filed an URGENT ticket for the existing program. Same fix as our Sybil layer 2 (relayer checks `pr.author.login == github_handle`). _Coordinate so the MCP and the human-side fix share the same check rather than duplicating._ | Gaston (lead) + MCP team | Phase 2 |
+| 11 | **GHB-183: cancel_bounty race-with-submissions** — Gaston filed URGENT. Program currently lets company cancel even after submissions land, voiding paid work. Fix: program-side check `submission_count == 0` OR a 14-day no-activity timeout. **Affects `bounties.prepare_cancel` MCP tool** — needs the same precondition. Block Phase 3 until program fix lands, or replicate the precondition off-chain in the MCP. | Gaston (program) + MCP team | Phase 3 |
 
 ## 14. Success criteria
 
