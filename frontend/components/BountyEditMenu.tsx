@@ -31,8 +31,7 @@ import {
   GasStationClientError,
   submitSponsored,
 } from "@/lib/gas-station-client";
-import type { Bounty, ReleaseMode } from "@/lib/types";
-import { ReleaseModePicker } from "./ReleaseModePicker";
+import type { Bounty } from "@/lib/types";
 import { UsdcIcon } from "./UsdcIcon";
 
 export function BountyEditMenu({
@@ -401,7 +400,7 @@ function BountyEditModal({
   onSaved: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [releaseMode, setReleaseMode] = useState<ReleaseMode>(bounty.releaseMode);
+  const privyMode = usePrivyBackend;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -429,7 +428,6 @@ function BountyEditModal({
     updateBounty(bounty.id, {
       title: title || undefined,
       amountUsdc: Math.round(amount),
-      releaseMode,
     });
     onSaved();
   }
@@ -477,11 +475,6 @@ function BountyEditModal({
               amount is locked in escrow.
             </span>
           </label>
-
-          <div className="field">
-            <span className="field-label">Release mode</span>
-            <ReleaseModePicker value={releaseMode} onChange={setReleaseMode} compact />
-          </div>
 
           {error && <div className="form-error">{error}</div>}
 
