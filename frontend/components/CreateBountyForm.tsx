@@ -237,6 +237,27 @@ export function CreateBountyForm({
             step={0.001}
             placeholder="0.5"
             required
+            onKeyDown={(e) => {
+              // GHB-184: hard-block letters/symbols. type="number" alone lets
+              // through 'e', '+', '-' (Chrome) and full pasted strings.
+              if (
+                e.key.length > 1 ||
+                e.ctrlKey ||
+                e.metaKey
+              ) {
+                return;
+              }
+              if (/^[0-9]$/.test(e.key)) return;
+              if (e.key === "." && !(e.currentTarget.value ?? "").includes(".")) return;
+              e.preventDefault();
+            }}
+            onPaste={(e) => {
+              const pasted = e.clipboardData.getData("text").trim();
+              if (!/^\d+(\.\d+)?$/.test(pasted)) {
+                e.preventDefault();
+                setError("Solo números (ej: 0.5)");
+              }
+            }}
           />
         </label>
 
