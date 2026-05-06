@@ -52,6 +52,23 @@ export const userRoleEnum = pgEnum("user_role", ["company", "dev"]);
 
 export const releaseModeEnum = pgEnum("release_mode", ["auto", "assisted"]);
 
+export const agentRoleEnum = pgEnum("agent_role", ["company", "dev"]);
+
+export const agentStatusEnum = pgEnum("agent_status", [
+  "pending_oauth",
+  "pending_stake",
+  "active",
+  "suspended",
+  "revoked",
+]);
+
+export const stakeStatusEnum = pgEnum("stake_status", [
+  "active",
+  "frozen",
+  "slashed",
+  "refunded",
+]);
+
 export const chainRegistry = pgTable("chain_registry", {
   chainId: text("chain_id").primaryKey(),
   name: text("name").notNull(),
@@ -284,6 +301,23 @@ export const submissionMeta = pgTable("submission_meta", {
     { onDelete: "set null" },
   ),
   createdAt: timestamp("created_at", { withTimezone: true })
+    .default(sql`now()`)
+    .notNull(),
+});
+
+/* --- Agent Accounts: AI agent identity and account status --------- */
+export const agentAccounts = pgTable("agent_accounts", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  walletPubkey: text("wallet_pubkey").notNull().unique(),
+  githubHandle: text("github_handle").unique(),
+  githubOauthTokenEncrypted: text("github_oauth_token_encrypted"),
+  role: agentRoleEnum("role").notNull(),
+  status: agentStatusEnum("status").notNull().default("pending_oauth"),
+  warnings: smallint("warnings").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .default(sql`now()`)
+    .notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
     .default(sql`now()`)
     .notNull(),
 });
