@@ -4,13 +4,12 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { parseIssueUrl } from "@/lib/github";
 import { CreateBountyFlow, type CreateBountyData } from "./CreateBountyFlow";
-import { ReleaseModePicker } from "./ReleaseModePicker";
 import { DepositModal } from "./DepositModal";
 import { WithdrawModal } from "./WithdrawModal";
 import { getConnection } from "@/lib/solana";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { usePrivyBackend } from "@/lib/auth-context";
-import type { Company, ReleaseMode } from "@/lib/types";
+import type { Company } from "@/lib/types";
 
 export function CreateBountyForm({
   company,
@@ -27,7 +26,6 @@ export function CreateBountyForm({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [flowData, setFlowData] = useState<CreateBountyData | null>(null);
-  const [releaseMode, setReleaseMode] = useState<ReleaseMode>("auto");
   const [balanceSol, setBalanceSol] = useState<number | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
@@ -121,7 +119,10 @@ export function CreateBountyForm({
       title: title || undefined,
       description: description || undefined,
       amount,
-      releaseMode,
+      // GHB-184: Release Mode picker is hidden in the UI but the column
+      // stays in the schema. Hardcoding 'assisted' here matches the new
+      // default and lets us re-enable user choice later without a migration.
+      releaseMode: "assisted",
       rejectThreshold,
       evaluationCriteria: criteria || null,
     });
@@ -269,11 +270,6 @@ export function CreateBountyForm({
             placeholder="What needs to be done, expected behavior, edge cases…"
           />
         </label>
-
-        <div className="field">
-          <span className="field-label">Release mode</span>
-          <ReleaseModePicker value={releaseMode} onChange={setReleaseMode} compact />
-        </div>
 
         <label className="field">
           <span className="field-label">Reject threshold (1-10, optional)</span>
