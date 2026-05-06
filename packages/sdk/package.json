@@ -12,7 +12,8 @@
     "codama:generate": "node scripts/generate-client.mjs"
   },
   "dependencies": {
-    "@solana/kit": "^6.9.0"
+    "@solana/kit": "^6.9.0",
+    "@solana/program-client-core": "^6.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
