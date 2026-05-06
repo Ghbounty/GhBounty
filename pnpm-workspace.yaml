@@ -2,3 +2,4 @@ packages:
   - "relayer"
   - "frontend"
   - "packages/*"
+  - "apps/*"
