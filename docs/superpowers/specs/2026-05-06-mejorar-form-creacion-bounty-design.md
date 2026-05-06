@@ -7,6 +7,27 @@
 
 ---
 
+## ⚠️ Errata — divergencia con la implementación (decisión de implementación)
+
+> Durante la implementación se detectó que la spec asumía un valor `'closed'` en el enum `issue_state` que **no existe** (los valores reales son `'open' | 'resolved' | 'cancelled'`). Cualquier referencia abajo a "el bounty pasa a `state='closed'`" o `state === 'closed'` quedó como artefacto histórico.
+>
+> **Decisión adoptada** (Opción B): el cap es un mecanismo **off-chain puro** que vive en una nueva columna `bounty_meta.closed_by_cap_at TIMESTAMPTZ`. `issues.state` queda intocado — sigue siendo el mirror fiel del estado on-chain (open/resolved/cancelled).
+>
+> Mapeo concreto de los conceptos del resto de la spec:
+>
+> | Spec dice | Implementación real |
+> |---|---|
+> | `issues.state = 'closed'` (set por el relayer) | `bounty_meta.closed_by_cap_at = now()` |
+> | `state === 'closed'` (chequeo en frontend) | `bounty.closedByCap === true` |
+> | conditional UPDATE en `issues` | CTE en `markScoredAndCheckCap` que UPDATE-ea `issues.review_eligible_count` + `bounty_meta.closed_by_cap_at` en una sentencia |
+> | "reabrir" un bounty | `UPDATE bounty_meta SET closed_by_cap_at = NULL` |
+>
+> Beneficio: `issues.state` no necesita un valor extra que el programa Anchor no produce, y reabrir el cap (raise) es trivial — solo se nullea el timestamp.
+>
+> Detalles en los commits `feat(GHB-184): atomic cap check on submission scoring` (relayer) y `feat(GHB-184): show cap_reached badge and disable Submit PR` (frontend).
+
+---
+
 ## 1. Contexto y motivación
 
 El form actual de creación de bounty (`frontend/components/CreateBountyForm.tsx`) tiene tres problemas detectados durante la revisión UX:
