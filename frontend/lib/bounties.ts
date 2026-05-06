@@ -50,6 +50,8 @@ export type InsertIssueAndMetaParams = {
   rejectThreshold?: number | null;
   /** Free-form criteria injected into the Opus prompt. Null = use default. */
   evaluationCriteria?: string | null;
+  /** GHB-184: cap opcional de submissions. Null = sin cap. */
+  maxSubmissions?: number | null;
   /** Privy DID of the company user — links the row to the profile. */
   createdByUserId: string;
 };
@@ -97,6 +99,7 @@ export async function insertIssueAndMeta(
     created_by_user_id: p.createdByUserId,
     reject_threshold: p.rejectThreshold ?? null,
     evaluation_criteria: p.evaluationCriteria ?? null,
+    max_submissions: p.maxSubmissions ?? null,
   });
 
   if (metaErr) {

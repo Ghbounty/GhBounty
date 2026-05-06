@@ -116,6 +116,8 @@ export type Database = {
           amount: string;
           state: "open" | "resolved" | "cancelled";
           submission_count: number;
+          // GHB-184
+          review_eligible_count: number;
           winner: string | null;
           github_issue_url: string;
           created_at: string;
@@ -131,6 +133,7 @@ export type Database = {
           amount: string;
           state?: "open" | "resolved" | "cancelled";
           submission_count?: number;
+          review_eligible_count?: number;
           winner?: string | null;
           github_issue_url: string;
           created_at?: string;
@@ -184,6 +187,10 @@ export type Database = {
           reject_threshold: number | null;
           // GHB-98
           evaluation_criteria: string | null;
+          // GHB-184
+          max_submissions: number | null;
+          closed_by_cap_at: string | null;
+          cap_warning_sent_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -196,6 +203,9 @@ export type Database = {
           created_by_user_id?: string | null;
           reject_threshold?: number | null;
           evaluation_criteria?: string | null;
+          max_submissions?: number | null;
+          closed_by_cap_at?: string | null;
+          cap_warning_sent_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["bounty_meta"]["Insert"]>;
         Relationships: [];

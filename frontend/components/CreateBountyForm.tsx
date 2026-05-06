@@ -78,6 +78,9 @@ export function CreateBountyForm({
     const criteria = (
       f.elements.namedItem("evaluationCriteria") as HTMLTextAreaElement
     )?.value.trim();
+    const maxSubsRaw = (
+      f.elements.namedItem("maxSubmissions") as HTMLInputElement
+    )?.value;
 
     const parsed = parseIssueUrl(url);
     if (!parsed) {
@@ -100,6 +103,17 @@ export function CreateBountyForm({
         return;
       }
       rejectThreshold = n;
+    }
+
+    // GHB-184: Max PRs is optional. Null = sin cap.
+    let maxSubmissions: number | null = null;
+    if (maxSubsRaw && maxSubsRaw.length > 0) {
+      const n = Number(maxSubsRaw);
+      if (!Number.isInteger(n) || n < 1) {
+        setError("Max PRs must be a positive integer.");
+        return;
+      }
+      maxSubmissions = n;
     }
 
     // Also block the submit if the user is trying to lock more than they
@@ -125,6 +139,7 @@ export function CreateBountyForm({
       releaseMode: "assisted",
       rejectThreshold,
       evaluationCriteria: criteria || null,
+      maxSubmissions,
     });
   }
 
@@ -280,6 +295,35 @@ export function CreateBountyForm({
             max={10}
             step={1}
             placeholder="8"
+          />
+        </label>
+
+        <label className="field">
+          <span className="field-label">Max PRs to review (optional)</span>
+          <input
+            name="maxSubmissions"
+            type="number"
+            min={1}
+            step={1}
+            placeholder="Sin límite (opcional)"
+            onKeyDown={(e) => {
+              if (
+                e.key.length > 1 ||
+                e.ctrlKey ||
+                e.metaKey
+              ) {
+                return;
+              }
+              if (/^[0-9]$/.test(e.key)) return;
+              e.preventDefault();
+            }}
+            onPaste={(e) => {
+              const pasted = e.clipboardData.getData("text").trim();
+              if (!/^\d+$/.test(pasted)) {
+                e.preventDefault();
+                setError("Max PRs solo acepta enteros positivos.");
+              }
+            }}
           />
         </label>
 
