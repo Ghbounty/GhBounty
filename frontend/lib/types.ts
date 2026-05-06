@@ -73,6 +73,24 @@ export type Bounty = {
    * `bounty_meta.reject_threshold`.
    */
   rejectThreshold?: number | null;
+  /**
+   * GHB-184: cap opcional de submissions. `null` = sin cap (default).
+   * Cuando `reviewEligibleCount === maxSubmissions` el relayer setea
+   * `bounty_meta.closed_by_cap_at` y el bounty deja de aceptar PRs.
+   */
+  maxSubmissions?: number | null;
+  /**
+   * GHB-184: counter de submissions con `state IN ('scored', 'winner')`.
+   * Independiente de `submissionCount` (que cuenta todas, incluyendo
+   * `pending` y `auto_rejected`). Backed por `issues.review_eligible_count`.
+   */
+  reviewEligibleCount?: number;
+  /**
+   * GHB-184: true cuando `bounty_meta.closed_by_cap_at !== null`. Es el flag
+   * off-chain que dispara el badge `cap_reached` y el `disabled` del botón
+   * Submit PR. `issues.state` no se toca (queda mirroreando on-chain).
+   */
+  closedByCap?: boolean;
   createdAt: number;
 };
 
