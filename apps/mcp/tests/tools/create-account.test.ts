@@ -195,3 +195,120 @@ describe("create_account.poll handler", () => {
     expect((result as any).error.code).toBe("Conflict");
   });
 });
+
+describe("create_account.complete handler", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    process.env.MCP_TOKEN_ENCRYPTION_KEY = "x".repeat(32);
+    process.env.GAS_STATION_SPONSOR_URL = "https://example.com/api/gas-station/sponsor";
+    process.env.GAS_STATION_SERVICE_TOKEN = "test-token";
+  });
+
+  it("returns BlockhashExpired when pending_txs row is gone or expired", async () => {
+    const { handleCreateAccountComplete } = await import(
+      "@/lib/tools/create-account/complete"
+    );
+
+    (supabaseAdmin as any).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              order: () => ({
+                limit: () => ({
+                  single: () =>
+                    Promise.resolve({ data: null, error: null }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    });
+
+    const result = await handleCreateAccountComplete({
+      account_id: "00000000-0000-0000-0000-000000000001",
+      signed_tx_b64: "AQAB",
+    });
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error.code).toBe("BlockhashExpired");
+  });
+
+  it("returns BlockhashExpired when pending_tx already consumed", async () => {
+    const { handleCreateAccountComplete } = await import(
+      "@/lib/tools/create-account/complete"
+    );
+
+    (supabaseAdmin as any).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              order: () => ({
+                limit: () => ({
+                  single: () =>
+                    Promise.resolve({
+                      data: {
+                        id: "tx-1",
+                        message_hash: "abc",
+                        expected_signer: "7xK...",
+                        expires_at: new Date(Date.now() + 30000).toISOString(),
+                        consumed_at: new Date().toISOString(),
+                      },
+                      error: null,
+                    }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    });
+
+    const result = await handleCreateAccountComplete({
+      account_id: "00000000-0000-0000-0000-000000000001",
+      signed_tx_b64: "AQAB",
+    });
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error.code).toBe("BlockhashExpired");
+  });
+
+  it("returns BlockhashExpired when pending_tx is past expires_at", async () => {
+    const { handleCreateAccountComplete } = await import(
+      "@/lib/tools/create-account/complete"
+    );
+
+    (supabaseAdmin as any).mockReturnValue({
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              order: () => ({
+                limit: () => ({
+                  single: () =>
+                    Promise.resolve({
+                      data: {
+                        id: "tx-1",
+                        message_hash: "abc",
+                        expected_signer: "7xK...",
+                        expires_at: new Date(Date.now() - 30000).toISOString(),
+                        consumed_at: null,
+                      },
+                      error: null,
+                    }),
+                }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    });
+
+    const result = await handleCreateAccountComplete({
+      account_id: "00000000-0000-0000-0000-000000000001",
+      signed_tx_b64: "AQAB",
+    });
+    if (!("error" in result)) throw new Error("expected error");
+    expect(result.error.code).toBe("BlockhashExpired");
+  });
+});
