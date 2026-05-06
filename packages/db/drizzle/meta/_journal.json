@@ -8,6 +8,13 @@
       "when": 1778080199015,
       "tag": "0017_mcp_agent_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778080551809,
+      "tag": "0018_mcp_agent_rls",
+      "breakpoints": true
     }
   ]
 }
