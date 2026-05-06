@@ -5,9 +5,12 @@ pub mod state;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke, system_instruction};
 
-use crate::constants::{BOUNTY_SEED, MAX_SCORE, MAX_URL_LEN, MIN_SCORE, SUBMISSION_SEED};
+use crate::constants::{
+    BOUNTY_SEED, MAX_SCORE, MAX_URL_LEN, MIN_SCORE, MIN_STAKE_LAMPORTS, STAKE_DEPOSIT_SEED,
+    STAKE_LOCK_SECONDS, SUBMISSION_SEED,
+};
 use crate::error::EscrowError;
-use crate::state::{Bounty, BountyState, Submission, SubmissionState};
+use crate::state::{Bounty, BountyState, StakeDeposit, StakeStatus, Submission, SubmissionState};
 
 declare_id!("CPZx26QXs3HjwGobr8cVAZEtF1qGzqnNbBdt7h1EwbBg");
 
@@ -138,6 +141,37 @@ pub mod ghbounty_escrow {
 
         Ok(())
     }
+
+    pub fn init_stake_deposit(
+        ctx: Context<InitStakeDeposit>,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount >= MIN_STAKE_LAMPORTS, EscrowError::StakeTooSmall);
+
+        let stake = &mut ctx.accounts.stake;
+        stake.owner = ctx.accounts.owner.key();
+        stake.amount = amount;
+        stake.status = StakeStatus::Active;
+        stake.created_at = Clock::get()?.unix_timestamp;
+        stake.locked_until = stake.created_at + STAKE_LOCK_SECONDS;
+        stake.bump = ctx.bumps.stake;
+
+        // Transfer lamports from owner to the stake PDA.
+        invoke(
+            &system_instruction::transfer(
+                &ctx.accounts.owner.key(),
+                &stake.key(),
+                amount,
+            ),
+            &[
+                ctx.accounts.owner.to_account_info(),
+                stake.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+        )?;
+
+        Ok(())
+    }
 }
 
 fn transfer_lamports(
@@ -257,4 +291,21 @@ pub struct SetScore<'info> {
         constraint = submission.bounty == bounty.key() @ EscrowError::SubmissionMismatch,
     )]
     pub submission: Account<'info, Submission>,
+}
+
+#[derive(Accounts)]
+pub struct InitStakeDeposit<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + StakeDeposit::INIT_SPACE,
+        seeds = [STAKE_DEPOSIT_SEED, owner.key().as_ref()],
+        bump,
+    )]
+    pub stake: Account<'info, StakeDeposit>,
+
+    pub system_program: Program<'info, System>,
 }
