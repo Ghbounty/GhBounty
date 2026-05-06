@@ -10,8 +10,10 @@
 // any serverless environment.
 //
 // Provisioned via Vercel Marketplace (Project → Storage → Browse Marketplace
-// → Upstash → Connect). Vercel auto-injects UPSTASH_REDIS_REST_URL +
-// UPSTASH_REDIS_REST_TOKEN; no manual setup needed.
+// → Upstash → Connect). Vercel auto-injects KV_REST_API_URL +
+// KV_REST_API_TOKEN (its legacy KV naming) when connected this way; direct
+// Upstash setups use UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN.
+// We accept both so the same code runs in either configuration.
 
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
@@ -19,10 +21,14 @@ import { Redis } from "@upstash/redis";
 let _redis: Redis | null = null;
 function redis(): Redis {
   if (_redis) return _redis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const url =
+    process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+  const token =
+    process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
   if (!url || !token) {
-    throw new Error("UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set");
+    throw new Error(
+      "Upstash Redis credentials must be set: UPSTASH_REDIS_REST_URL/_TOKEN (direct) or KV_REST_API_URL/_TOKEN (Vercel Marketplace)"
+    );
   }
   _redis = new Redis({ url, token });
   return _redis;
