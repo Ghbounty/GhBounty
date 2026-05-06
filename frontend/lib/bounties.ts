@@ -152,6 +152,42 @@ export async function deleteIssueAndMeta(
 }
 
 /**
+ * GHB-184: edit the off-chain cap on a bounty.
+ *
+ * `maxSubmissions = null` removes the cap (and reopens the bounty if it had
+ * been auto-closed by the cap). Setting a value larger than the current
+ * `review_eligible_count` also reopens. Going below it is a guardrail at the
+ * UI layer — caller is expected to validate, but we'd accept the write
+ * because we can't reliably read the current count from this side without an
+ * extra query.
+ *
+ * The relayer is the source of truth for `closed_by_cap_at`: this helper
+ * only nulls it when the new cap clearly opens space again.
+ */
+export async function updateBountyCap(
+  supabase: DBClient,
+  issueId: string,
+  maxSubmissions: number | null,
+  /** Current `issues.review_eligible_count`. Used to decide whether to clear
+   * `closed_by_cap_at` (i.e. reopen the bounty for new PRs). */
+  currentReviewEligibleCount: number,
+): Promise<void> {
+  const reopens =
+    maxSubmissions === null || maxSubmissions > currentReviewEligibleCount;
+  const updates: {
+    max_submissions: number | null;
+    closed_by_cap_at?: null;
+  } = { max_submissions: maxSubmissions };
+  if (reopens) updates.closed_by_cap_at = null;
+
+  const { error } = await supabase
+    .from("bounty_meta")
+    .update(updates)
+    .eq("issue_id", issueId);
+  if (error) throw new Error(`updateBountyCap: ${error.message}`);
+}
+
+/**
  * Mark a bounty as closed in `bounty_meta.closed_by_user`. The on-chain
  * bounty stays Open — funds remain locked until someone calls
  * `cancel_bounty` or `resolve_bounty`. UI hides closed rows from the

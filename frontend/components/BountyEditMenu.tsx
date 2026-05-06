@@ -22,7 +22,7 @@ import {
   updateBounty,
 } from "@/lib/store";
 import { usePrivyBackend } from "@/lib/auth-context";
-import { closeIssue, deleteIssueAndMeta } from "@/lib/bounties";
+import { closeIssue, deleteIssueAndMeta, updateBountyCap } from "@/lib/bounties";
 import { buildCancelBountyIx, getConnection } from "@/lib/solana";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -414,7 +414,7 @@ function BountyEditModal({
     };
   }, [onClose]);
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     const f = e.currentTarget;
@@ -425,10 +425,58 @@ function BountyEditModal({
       setError("Amount must be a positive number.");
       return;
     }
+
+    // GHB-184: empty cap input → null (sin cap). Otherwise must be a positive
+    // integer >= the current review_eligible_count (guardrail: bajar el cap
+    // bajo lo ya recibido haría que la regla del relayer cierre el bounty
+    // inmediatamente — confuso para el usuario).
+    const maxSubsRaw = (
+      f.elements.namedItem("maxSubmissions") as HTMLInputElement | null
+    )?.value;
+    const currentCount = bounty.reviewEligibleCount ?? 0;
+    let maxSubmissions: number | null;
+    if (maxSubsRaw && maxSubsRaw.length > 0) {
+      const n = Number(maxSubsRaw);
+      if (!Number.isInteger(n) || n < 1) {
+        setError("Max PRs must be a positive integer.");
+        return;
+      }
+      if (n < currentCount) {
+        setError(
+          `No podés bajar el cap a ${n}: ya recibiste ${currentCount} PRs en review. Mínimo permitido: ${currentCount}.`,
+        );
+        return;
+      }
+      maxSubmissions = n;
+    } else {
+      maxSubmissions = null;
+    }
+
+    // localStorage mock: keep UI snappy
     updateBounty(bounty.id, {
       title: title || undefined,
       amountUsdc: Math.round(amount),
+      maxSubmissions,
+      closedByCap:
+        maxSubmissions !== null && maxSubmissions <= currentCount
+          ? bounty.closedByCap
+          : false,
     });
+
+    // Supabase: persist cap (real backend only — in mock mode bounty.id is a
+    // PDA and the row doesn't exist server-side).
+    if (privyMode) {
+      try {
+        const supabase = createClient();
+        await updateBountyCap(supabase, bounty.id, maxSubmissions, currentCount);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to persist cap",
+        );
+        return;
+      }
+    }
+
     onSaved();
   }
 
@@ -473,6 +521,31 @@ function BountyEditModal({
             <span className="field-hint">
               You can increase the reward to attract stronger PRs. The extra
               amount is locked in escrow.
+            </span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">Max PRs to review (optional)</span>
+            <input
+              name="maxSubmissions"
+              type="number"
+              min={Math.max(bounty.reviewEligibleCount ?? 0, 1)}
+              step={1}
+              defaultValue={bounty.maxSubmissions ?? ""}
+              placeholder="Sin límite (opcional)"
+              onKeyDown={(e) => {
+                if (
+                  e.key.length > 1 ||
+                  e.ctrlKey ||
+                  e.metaKey
+                ) return;
+                if (/^[0-9]$/.test(e.key)) return;
+                e.preventDefault();
+              }}
+            />
+            <span className="field-hint">
+              Cuando se alcance este número, el bounty se cierra
+              automáticamente y deja de aceptar PRs.
             </span>
           </label>
 
