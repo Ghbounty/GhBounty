@@ -223,6 +223,8 @@ export async function listMyIssues(supabase: DBClient, userId: string) {
       closed_by_user,
       reject_threshold,
       evaluation_criteria,
+      max_submissions,
+      closed_by_cap_at,
       created_at,
       issues (
         chain_id,
@@ -234,6 +236,7 @@ export async function listMyIssues(supabase: DBClient, userId: string) {
         amount,
         state,
         submission_count,
+        review_eligible_count,
         winner,
         github_issue_url,
         created_at
