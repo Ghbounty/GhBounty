@@ -210,6 +210,38 @@ pub mod ghbounty_escrow {
 
         Ok(())
     }
+
+    pub fn refund_stake_deposit(ctx: Context<RefundStakeDeposit>) -> Result<()> {
+        require_keys_eq!(
+            ctx.accounts.authority.key(),
+            STAKE_AUTHORITY_PUBKEY,
+            EscrowError::UnauthorizedStakeAuthority
+        );
+
+        let stake = &mut ctx.accounts.stake;
+        require!(stake.status == StakeStatus::Active, EscrowError::StakeNotActive);
+        require!(
+            Clock::get()?.unix_timestamp >= stake.locked_until,
+            EscrowError::StakeStillLocked
+        );
+
+        let amount = stake.amount;
+        let stake_info = stake.to_account_info();
+        let owner_info = ctx.accounts.owner.to_account_info();
+        **stake_info.try_borrow_mut_lamports()? = stake_info
+            .lamports()
+            .checked_sub(amount)
+            .ok_or(EscrowError::LamportOverflow)?;
+        **owner_info.try_borrow_mut_lamports()? = owner_info
+            .lamports()
+            .checked_add(amount)
+            .ok_or(EscrowError::LamportOverflow)?;
+
+        stake.amount = 0;
+        stake.status = StakeStatus::Refunded;
+
+        Ok(())
+    }
 }
 
 fn transfer_lamports(
@@ -363,4 +395,21 @@ pub struct SlashStakeDeposit<'info> {
     /// (the relayer always uses the GhBounty slash treasury account).
     #[account(mut)]
     pub treasury: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct RefundStakeDeposit<'info> {
+    pub authority: Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [STAKE_DEPOSIT_SEED, stake.owner.as_ref()],
+        bump = stake.bump,
+        constraint = stake.owner == owner.key() @ EscrowError::UnauthorizedStakeAuthority,
+    )]
+    pub stake: Account<'info, StakeDeposit>,
+
+    /// CHECK: refund destination — must match `stake.owner` (validated above).
+    #[account(mut)]
+    pub owner: UncheckedAccount<'info>,
 }

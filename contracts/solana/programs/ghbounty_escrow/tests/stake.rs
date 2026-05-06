@@ -170,3 +170,58 @@ fn slash_stake_deposit_rejects_non_authority() {
     let logs = err.meta.logs.join("\n");
     assert!(logs.contains("UnauthorizedStakeAuthority"), "logs: {}", logs);
 }
+
+fn refund_ix(authority: &Pubkey, owner: &Pubkey) -> Instruction {
+    let (stake, _) = stake_pda(owner);
+    let accounts = ghbounty_escrow::accounts::RefundStakeDeposit {
+        authority: *authority,
+        stake,
+        owner: *owner,
+    }
+    .to_account_metas(None);
+    let data = ghbounty_escrow::instruction::RefundStakeDeposit {}.data();
+    Instruction { program_id: PROGRAM_ID, accounts, data }
+}
+
+#[test]
+fn refund_stake_deposit_after_lock_succeeds() {
+    let mut svm = setup();
+    let owner = funded(&mut svm, 1_000_000_000);
+
+    let authority = load_authority_keypair();
+    svm.airdrop(&authority.pubkey(), 1_000_000).unwrap();
+
+    send(&mut svm, &owner, init_stake_ix(&owner.pubkey(), MIN_STAKE_LAMPORTS)).unwrap();
+
+    // Fast-forward LiteSVM clock past the lock period.
+    let mut clock = svm.get_sysvar::<solana_clock::Clock>();
+    clock.unix_timestamp += 15 * 24 * 60 * 60; // 15 days
+    svm.set_sysvar(&clock);
+
+    let owner_balance_before = svm.get_balance(&owner.pubkey()).unwrap();
+    send(&mut svm, &authority, refund_ix(&authority.pubkey(), &owner.pubkey()))
+        .expect("refund should succeed");
+    let owner_balance_after = svm.get_balance(&owner.pubkey()).unwrap();
+
+    // Owner gains MIN_STAKE_LAMPORTS minus negligible epsilon.
+    assert!(
+        owner_balance_after > owner_balance_before + MIN_STAKE_LAMPORTS - 100_000,
+        "expected owner balance to increase by ~MIN_STAKE_LAMPORTS"
+    );
+}
+
+#[test]
+fn refund_stake_deposit_rejects_within_lock() {
+    let mut svm = setup();
+    let owner = funded(&mut svm, 1_000_000_000);
+
+    let authority = load_authority_keypair();
+    svm.airdrop(&authority.pubkey(), 1_000_000).unwrap();
+
+    send(&mut svm, &owner, init_stake_ix(&owner.pubkey(), MIN_STAKE_LAMPORTS)).unwrap();
+
+    let err = send(&mut svm, &authority, refund_ix(&authority.pubkey(), &owner.pubkey()))
+        .expect_err("refund within lock should fail");
+    let logs = err.meta.logs.join("\n");
+    assert!(logs.contains("StakeStillLocked"), "logs: {}", logs);
+}
