@@ -8,12 +8,8 @@ import { StatusBadge, type StatusBadgeStatus } from "./StatusBadge";
 import { UsdcIcon } from "./UsdcIcon";
 import type { Bounty, Company } from "@/lib/types";
 
-/**
- * GHB-184: derive the visual status, surfacing the cap-reached state when
- * the bounty was auto-closed by hitting `maxSubmissions`. Exported so the
- * dev page can reuse it to gate the "Submit PR" button without duplicating
- * the rule.
- */
+// Exported so callers gating on `cap_reached` (e.g. the dev page's Submit
+// PR button) don't duplicate the rule.
 export function visualStatus(bounty: Bounty): StatusBadgeStatus {
   if (bounty.closedByCap) return "cap_reached";
   return bounty.status;

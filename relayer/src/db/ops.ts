@@ -76,6 +76,17 @@ export async function upsertSubmission(
     .onConflictDoNothing({ target: submissions.pda });
 }
 
+/**
+ * Drizzle's `db.execute(sql\`...\`)` return shape varies across drivers
+ * (postgres-js exposes `.rows`, others spread an array). This collapses both
+ * shapes into a typed array.
+ */
+function rowsOf<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[];
+  const r = result as { rows?: unknown };
+  return (Array.isArray(r.rows) ? r.rows : []) as T[];
+}
+
 export async function markScored(
   db: Db,
   submissionPda: string,
@@ -128,13 +139,6 @@ export async function markScoredAndCheckCap(
   submissionPda: string,
   issuePda: string,
 ): Promise<CapCheckResult> {
-  // CTE pattern (Option B):
-  //   1. `bumped` increments review_eligible_count when the bounty is open
-  //      to more PRs. Failure (closed_by_cap_at IS NOT NULL or count == max)
-  //      yields no row.
-  //   2. `closed` sets bounty_meta.closed_by_cap_at when the new count meets
-  //      or exceeds max — runs only if `bumped` produced a row.
-  //   3. Final SELECT returns the bumped row plus a `just_closed` flag.
   const result = await db.execute(sql`
     WITH bumped AS (
       UPDATE issues i
@@ -183,10 +187,7 @@ export async function markScoredAndCheckCap(
     bounty_title: string | null;
     just_closed: boolean;
   };
-  const list = (result as unknown as { rows?: Row[] }).rows;
-  const flat = Array.isArray(result) ? (result as unknown as Row[]) : list ?? [];
-  const first = flat[0];
-
+  const first = rowsOf<Row>(result)[0];
   if (!first) {
     return { applied: false };
   }
@@ -230,9 +231,7 @@ export async function isBountyOpenForSubmissions(
      LIMIT 1
   `);
   type Row = { state: string; closed_by_cap_at: string | null };
-  const list = (rows as unknown as { rows?: Row[] }).rows;
-  const flat = Array.isArray(rows) ? (rows as unknown as Row[]) : list ?? [];
-  const first = flat[0];
+  const first = rowsOf<Row>(rows)[0];
   if (!first) return true; // no row yet (mock/legacy) — let it through
   return first.state === "open" && first.closed_by_cap_at === null;
 }
@@ -467,12 +466,8 @@ export async function getSubmittedByUserId(
        LIMIT 1
     `,
   );
-  // drizzle's `execute` returns a Result; rows accessor varies by driver.
-  const list = (rows as unknown as { rows?: Array<{ user_id: string | null }> })
-    .rows;
-  const flat = Array.isArray(rows) ? rows : list ?? [];
-  const first = flat[0] as { user_id?: string | null } | undefined;
-  return first?.user_id ?? null;
+  type Row = { user_id: string | null };
+  return rowsOf<Row>(rows)[0]?.user_id ?? null;
 }
 
 /**
@@ -526,9 +521,7 @@ export async function getBountyDisplayInfo(
     company_name?: string | null;
     company_avatar_url?: string | null;
   };
-  const list = (rows as unknown as { rows?: Row[] }).rows;
-  const flat = Array.isArray(rows) ? (rows as Row[]) : list ?? [];
-  const first = flat[0];
+  const first = rowsOf<Row>(rows)[0];
   if (!first) return null;
   return {
     title: first.title ?? null,

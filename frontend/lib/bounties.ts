@@ -154,22 +154,15 @@ export async function deleteIssueAndMeta(
 /**
  * GHB-184: edit the off-chain cap on a bounty.
  *
- * `maxSubmissions = null` removes the cap (and reopens the bounty if it had
- * been auto-closed by the cap). Setting a value larger than the current
- * `review_eligible_count` also reopens. Going below it is a guardrail at the
- * UI layer — caller is expected to validate, but we'd accept the write
- * because we can't reliably read the current count from this side without an
- * extra query.
- *
- * The relayer is the source of truth for `closed_by_cap_at`: this helper
- * only nulls it when the new cap clearly opens space again.
+ * Clears `closed_by_cap_at` only when the new cap leaves room (or is null),
+ * so a cap-closed bounty reopens automatically when the company raises it.
+ * The relayer is the source of truth for setting that flag — this helper
+ * only ever nulls it.
  */
 export async function updateBountyCap(
   supabase: DBClient,
   issueId: string,
   maxSubmissions: number | null,
-  /** Current `issues.review_eligible_count`. Used to decide whether to clear
-   * `closed_by_cap_at` (i.e. reopen the bounty for new PRs). */
   currentReviewEligibleCount: number,
 ): Promise<void> {
   const reopens =

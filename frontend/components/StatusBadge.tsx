@@ -1,9 +1,7 @@
 import type { BountyStatus } from "@/lib/types";
 
-// GHB-184: cap_reached is a UI-derived state, not a value of the DB enum.
-// `BountyRow` (or any caller) is responsible for picking it when a bounty
-// has been auto-closed by the cap mechanism — keeps StatusBadge dumb and
-// keeps the cap rule in one place upstream.
+// `cap_reached` is a UI-only superset of BountyStatus; callers compute it
+// (see `visualStatus` in BountyRow) so the cap rule lives in one place.
 export type StatusBadgeStatus = BountyStatus | "cap_reached";
 
 const LABELS: Record<StatusBadgeStatus, string> = {

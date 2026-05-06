@@ -1033,7 +1033,7 @@ describe("GHB-184: cap de submissions", () => {
     expect(analyze).not.toHaveBeenCalled();
     expect(setScore).not.toHaveBeenCalled();
     expect(r.outcome).toBe("auto_rejected");
-    expect(r.txHash).toBe("skipped-bounty-closed");
+    expect(r.txHash).toBe("bounty_closed");
 
     // Submission was marked auto_rejected via the existing markAutoRejected
     // path (drizzle update, recorded as kind="update").

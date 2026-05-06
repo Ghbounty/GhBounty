@@ -1,15 +1,11 @@
 -- 0017_max_submissions_cap.sql
--- GHB-184: cap opcional de submissions por bounty (off-chain only).
+-- GHB-184: optional submission cap (off-chain only).
 --
--- Decisión clave: el cap NO toca issues.state (que mirrors on-chain). En su
--- lugar, bounty_meta.closed_by_cap_at se setea cuando el cap se alcanza.
--- Frontend deriveStatus() y el pre-check del relayer leen ese flag.
---
--- Suma counter dedicado review_eligible_count para no romper la semántica de
--- submission_count (que cuenta TODAS las submissions, incluyendo pending y
--- auto_rejected).
--- También finaliza el cleanup de release_mode: default pasa a 'assisted',
--- las pocas filas con 'auto' se migran.
+-- Key decision: the cap does NOT touch issues.state (which mirrors on-chain).
+-- Instead, bounty_meta.closed_by_cap_at is stamped when the cap is hit, so
+-- the off-chain rule never collides with on-chain reality. Two new counters
+-- live in their own columns to keep submission_count's semantics intact
+-- (it counts everything; review_eligible_count counts only scored+winner).
 
 -- 1. Cap de submissions (nullable = sin cap)
 ALTER TABLE bounty_meta ADD COLUMN max_submissions INTEGER;

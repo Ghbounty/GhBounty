@@ -216,6 +216,8 @@ type IssueRow = {
   } | null;
 };
 
+// `cap_warning_sent_at` lives only in `bounty_meta` for relayer-side gating
+// — the frontend never reads it, so we keep it out of the public select.
 const ISSUE_SELECT =
   "id, pda, github_issue_url, amount, state, submission_count, review_eligible_count, created_at, bounty_meta(title, description, release_mode, closed_by_user, created_by_user_id, reject_threshold, max_submissions, closed_by_cap_at)";
 

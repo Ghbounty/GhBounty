@@ -400,7 +400,6 @@ function BountyEditModal({
   onSaved: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const privyMode = usePrivyBackend;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -465,7 +464,7 @@ function BountyEditModal({
 
     // Supabase: persist cap (real backend only — in mock mode bounty.id is a
     // PDA and the row doesn't exist server-side).
-    if (privyMode) {
+    if (usePrivyBackend) {
       try {
         const supabase = createClient();
         await updateBountyCap(supabase, bounty.id, maxSubmissions, currentCount);
