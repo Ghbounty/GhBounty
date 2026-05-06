@@ -21,6 +21,8 @@
  * the outcome and tx metadata.
  */
 
+import { timingSafeEqual } from "node:crypto";
+
 import { jwtVerify } from "jose";
 import type { JWTPayload, JWTVerifyGetKey } from "jose";
 
@@ -84,6 +86,12 @@ export interface SponsorRouteDeps {
 export interface SponsorRouteRequest {
   /** Raw `Authorization` header value, e.g. `"Bearer eyJ..."`. */
   authorization: string | null;
+  /**
+   * Value of the `x-mcp-service-token` header when present (used by
+   * the MCP server for service-to-service calls). `null` if the header
+   * was not sent.
+   */
+  mcpServiceToken: string | null;
   /**
    * Parsed JSON body. Untyped on purpose: validation lives in this
    * file so the route doesn't have to defend against shape errors.
@@ -188,6 +196,161 @@ export async function handleSponsorRequest(
   deps: SponsorRouteDeps,
 ): Promise<SponsorRouteResponse> {
   const start = Date.now();
+
+  // 1. Auth — MCP service-to-service path (checked before Privy so the
+  //    MCP server never needs a Privy session).
+  //
+  //    Rules:
+  //      - GAS_STATION_SERVICE_TOKEN env not set  → ignore header; fall through
+  //        to Privy (defensive: old deployments not yet configured).
+  //      - header present + env set + match        → bypass Privy, continue.
+  //      - header present + env set + mismatch     → 401 immediately.
+  //      - header present + env NOT set            → 401 (header sent but server
+  //        not configured; reject rather than silently falling through to avoid
+  //        surprising the caller).
+  const mcpToken = req.mcpServiceToken;
+  const expectedToken = process.env.GAS_STATION_SERVICE_TOKEN ?? "";
+
+  if (mcpToken !== null) {
+    if (!expectedToken) {
+      // Header sent but server not configured — reject explicitly.
+      deps.log({
+        privyDid: null,
+        status: 401,
+        outcome: "auth_failed",
+        reason: "MCP service token rejected: server not configured",
+        durationMs: Date.now() - start,
+      });
+      return {
+        status: 401,
+        body: {
+          error: "Unauthorized",
+          reason: "MCP service token rejected: server not configured",
+        },
+      };
+    }
+    // Timing-safe compare to prevent oracle attacks.
+    const a = Buffer.from(mcpToken);
+    const b = Buffer.from(expectedToken);
+    const valid = a.length === b.length && timingSafeEqual(a, b);
+    if (!valid) {
+      deps.log({
+        privyDid: null,
+        status: 401,
+        outcome: "auth_failed",
+        reason: "invalid MCP service token",
+        durationMs: Date.now() - start,
+      });
+      return {
+        status: 401,
+        body: { error: "Unauthorized", reason: "invalid MCP service token" },
+      };
+    }
+    // Valid service token — skip Privy verification entirely and jump
+    // straight to body parsing / sponsoring. We use a synthetic DID so
+    // the log entry is always populated.
+    const privyDid = "mcp-service";
+
+    // 2b. Body (service-token path mirrors the Privy path from here).
+    const parsed = parseSponsorBody(req.body);
+    if (!parsed.ok) {
+      deps.log({
+        privyDid,
+        status: 400,
+        outcome: "bad_request",
+        reason: parsed.reason,
+        durationMs: Date.now() - start,
+      });
+      return { status: 400, body: { error: parsed.reason } };
+    }
+
+    // 3b. Reserve check.
+    let balance: number;
+    try {
+      balance = await deps.getBalanceLamports();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      deps.log({
+        privyDid,
+        status: 500,
+        outcome: "internal_error",
+        reason: `balance lookup failed: ${reason}`,
+        durationMs: Date.now() - start,
+      });
+      return { status: 500, body: { error: "internal error" } };
+    }
+    if (balance < deps.minReserveLamports) {
+      const reason = `wallet balance ${balance} below reserve ${deps.minReserveLamports}`;
+      deps.log({
+        privyDid,
+        status: 503,
+        outcome: "insufficient_reserve",
+        reason,
+        durationMs: Date.now() - start,
+      });
+      return {
+        status: 503,
+        body: {
+          error: "gas station temporarily unavailable",
+          reason: "insufficient_reserve",
+        },
+      };
+    }
+
+    // 4b. Sponsor.
+    try {
+      const result = await deps.gasStation.sponsor(parsed.value);
+      deps.log({
+        privyDid,
+        status: 200,
+        outcome: "ok",
+        txHash: result.txHash,
+        durationMs: Date.now() - start,
+      });
+      return { status: 200, body: { txHash: result.txHash } };
+    } catch (err) {
+      if (err instanceof GasStationError) {
+        const status = mapGasStationCodeToStatus(err.code);
+        const outcome =
+          err.code === "validator_rejected"
+            ? "validator_rejected"
+            : err.code === "rpc_error"
+              ? "rpc_error"
+              : "internal_error";
+        deps.log({
+          privyDid,
+          status,
+          outcome,
+          reason: `${err.code}: ${err.message}`,
+          durationMs: Date.now() - start,
+        });
+        if (err.code === "validator_rejected") {
+          return {
+            status,
+            body: { error: "tx rejected by gas station", reason: err.message },
+          };
+        }
+        if (err.code === "rpc_error") {
+          return {
+            status,
+            body: { error: "gas station error", reason: err.message },
+          };
+        }
+        return { status, body: { error: "gas station error" } };
+      }
+      const reason = err instanceof Error ? err.message : String(err);
+      deps.log({
+        privyDid,
+        status: 500,
+        outcome: "internal_error",
+        reason,
+        durationMs: Date.now() - start,
+      });
+      return { status: 500, body: { error: "internal error" } };
+    }
+  }
+
+  // Fall through to existing Privy verification when no MCP header is present.
 
   // 1. Auth.
   const token = parseBearerToken(req.authorization);
