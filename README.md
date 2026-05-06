@@ -67,6 +67,21 @@ ghbounty/
 
 Directories are added as each phase lands.
 
+### Stake authority keypair (MCP Phase 0)
+
+Each developer must generate their own dev keypair for the stake authority:
+
+```bash
+mkdir -p contracts/solana/keys
+solana-keygen new --no-bip39-passphrase --silent \
+  --outfile contracts/solana/keys/stake-authority-dev.json
+solana-keygen pubkey contracts/solana/keys/stake-authority-dev.json
+```
+
+The pubkey is hardcoded in `contracts/solana/programs/ghbounty_escrow/src/constants.rs` as `STAKE_AUTHORITY_PUBKEY`. The keypair is loaded by the relayer via `STAKE_AUTHORITY_KEYPAIR_JSON` env var (see `relayer/.env.example`).
+
+For mainnet rotation, see [GHB-179](https://linear.app/ghbounty/issue/GHB-179).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
