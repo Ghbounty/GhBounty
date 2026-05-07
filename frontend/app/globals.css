@@ -1467,6 +1467,8 @@ section { position: relative; padding: 120px 40px; }
 .status-badge.status-rejected { color: #FF6B6B; border-color: rgba(255, 107, 107, 0.3); background: rgba(255, 107, 107, 0.05); }
 .status-badge.status-paid { color: var(--text-dim); background: rgba(255,255,255,0.02); }
 .status-badge.status-closed { color: var(--text-muted); background: rgba(255,255,255,0.02); border-color: var(--border); }
+/* GHB-184: distinct from manual close — purple signals "auto-closed by cap". */
+.status-badge.status-cap_reached { color: #B58CFF; background: rgba(94, 80, 200, 0.08); border-color: rgba(181, 140, 255, 0.35); }
 
 /* Subtle counter showing how many PRs have been submitted to a bounty.
    Sits next to the StatusBadge in the card header so the company can
@@ -1866,6 +1868,17 @@ section { position: relative; padding: 120px 40px; }
   border-color: var(--accent);
   background: rgba(0,229,209,0.05);
   box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(0,229,209,0.1);
+}
+/* GHB-184: read-only variant — neutral border, no glow, no hover affordance
+   since the option isn't a button. Reuses the layout/icon styles but stays
+   visually quiet so it doesn't compete with the form's required fields. */
+.release-opt.static { cursor: default; }
+.release-opt.static:hover { border-color: var(--border); }
+/* Drop the accent color from the icon — keeps the card visually neutral
+   alongside the rest of the form. */
+.release-opt.static .release-opt-icon {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
 }
 .release-opt-icon {
   width: 32px; height: 32px; border-radius: 8px;

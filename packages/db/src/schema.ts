@@ -95,6 +95,10 @@ export const issues = pgTable("issues", {
   amount: bigint("amount", { mode: "bigint" }).notNull(),
   state: issueStateEnum("state").notNull().default("open"),
   submissionCount: integer("submission_count").notNull().default(0),
+  // GHB-184: counter de submissions con state IN ('scored','winner').
+  // Independiente de submissionCount (que cuenta TODAS, incluyendo pending y
+  // auto_rejected). Backed por el atomic UPDATE en relayer/submission-handler.
+  reviewEligibleCount: integer("review_eligible_count").notNull().default(0),
   winner: text("winner"),
   githubIssueUrl: text("github_issue_url").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -267,9 +271,16 @@ export const bountyMeta = pgTable("bounty_meta", {
     .references(() => issues.id, { onDelete: "cascade" }),
   title: text("title"),
   description: text("description"),
-  releaseMode: releaseModeEnum("release_mode").notNull().default("auto"),
+  releaseMode: releaseModeEnum("release_mode").notNull().default("assisted"),
   // Whether the company explicitly closed it from the UI (vs onchain cancel)
   closedByUser: boolean("closed_by_user").notNull().default(false),
+  // GHB-184: cap opcional de submissions. null = sin cap (default).
+  maxSubmissions: integer("max_submissions"),
+  // GHB-184: timestamp en que el bounty se cerró por alcanzar el cap.
+  // null = todavía acepta PRs. Off-chain only — issues.state queda intocado.
+  closedByCapAt: timestamp("closed_by_cap_at", { withTimezone: true }),
+  // GHB-184: flag para emitir la notif "80% del cap" una sola vez.
+  capWarningSentAt: timestamp("cap_warning_sent_at", { withTimezone: true }),
   // Link onchain creator wallet → user profile (when known)
   createdByUserId: text("created_by_user_id").references(
     () => profiles.userId,

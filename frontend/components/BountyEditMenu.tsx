@@ -22,7 +22,7 @@ import {
   updateBounty,
 } from "@/lib/store";
 import { usePrivyBackend } from "@/lib/auth-context";
-import { closeIssue, deleteIssueAndMeta } from "@/lib/bounties";
+import { closeIssue, deleteIssueAndMeta, updateBountyCap } from "@/lib/bounties";
 import { buildCancelBountyIx, getConnection } from "@/lib/solana";
 import { createClient } from "@/utils/supabase/client";
 import {
@@ -31,8 +31,7 @@ import {
   GasStationClientError,
   submitSponsored,
 } from "@/lib/gas-station-client";
-import type { Bounty, ReleaseMode } from "@/lib/types";
-import { ReleaseModePicker } from "./ReleaseModePicker";
+import type { Bounty } from "@/lib/types";
 import { UsdcIcon } from "./UsdcIcon";
 
 export function BountyEditMenu({
@@ -401,7 +400,6 @@ function BountyEditModal({
   onSaved: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [releaseMode, setReleaseMode] = useState<ReleaseMode>(bounty.releaseMode);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -415,7 +413,7 @@ function BountyEditModal({
     };
   }, [onClose]);
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     const f = e.currentTarget;
@@ -426,11 +424,58 @@ function BountyEditModal({
       setError("Amount must be a positive number.");
       return;
     }
+
+    // GHB-184: empty cap input → null (sin cap). Otherwise must be a positive
+    // integer >= the current review_eligible_count (guardrail: bajar el cap
+    // bajo lo ya recibido haría que la regla del relayer cierre el bounty
+    // inmediatamente — confuso para el usuario).
+    const maxSubsRaw = (
+      f.elements.namedItem("maxSubmissions") as HTMLInputElement | null
+    )?.value;
+    const currentCount = bounty.reviewEligibleCount ?? 0;
+    let maxSubmissions: number | null;
+    if (maxSubsRaw && maxSubsRaw.length > 0) {
+      const n = Number(maxSubsRaw);
+      if (!Number.isInteger(n) || n < 1) {
+        setError("Max PRs must be a positive integer.");
+        return;
+      }
+      if (n < currentCount) {
+        setError(
+          `No podés bajar el cap a ${n}: ya recibiste ${currentCount} PRs en review. Mínimo permitido: ${currentCount}.`,
+        );
+        return;
+      }
+      maxSubmissions = n;
+    } else {
+      maxSubmissions = null;
+    }
+
+    // localStorage mock: keep UI snappy
     updateBounty(bounty.id, {
       title: title || undefined,
       amountUsdc: Math.round(amount),
-      releaseMode,
+      maxSubmissions,
+      closedByCap:
+        maxSubmissions !== null && maxSubmissions <= currentCount
+          ? bounty.closedByCap
+          : false,
     });
+
+    // Supabase: persist cap (real backend only — in mock mode bounty.id is a
+    // PDA and the row doesn't exist server-side).
+    if (usePrivyBackend) {
+      try {
+        const supabase = createClient();
+        await updateBountyCap(supabase, bounty.id, maxSubmissions, currentCount);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to persist cap",
+        );
+        return;
+      }
+    }
+
     onSaved();
   }
 
@@ -478,9 +523,52 @@ function BountyEditModal({
             </span>
           </label>
 
+          <label className="field">
+            <span className="field-label">Max PRs to review (optional)</span>
+            <input
+              name="maxSubmissions"
+              type="number"
+              min={Math.max(bounty.reviewEligibleCount ?? 0, 1)}
+              step={1}
+              defaultValue={bounty.maxSubmissions ?? ""}
+              placeholder="No limit (optional)"
+              onKeyDown={(e) => {
+                if (
+                  e.key.length > 1 ||
+                  e.ctrlKey ||
+                  e.metaKey
+                ) return;
+                if (/^[0-9]$/.test(e.key)) return;
+                e.preventDefault();
+              }}
+            />
+            <span className="field-hint">
+              When this number is reached, the bounty closes automatically
+              and stops accepting PRs.
+            </span>
+          </label>
+
+          {/* GHB-184: same read-only release mode display as in CreateBountyForm.
+              Kept here so editing a bounty surfaces the review flow consistently. */}
           <div className="field">
             <span className="field-label">Release mode</span>
-            <ReleaseModePicker value={releaseMode} onChange={setReleaseMode} compact />
+            <div className="release-picker compact">
+              <div className="release-opt static">
+                <span className="release-opt-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7v5l3 2" />
+                  </svg>
+                </span>
+                <span className="release-opt-body">
+                  <span className="release-opt-title">AI-assisted review</span>
+                  <span className="release-opt-desc">
+                    Receive many PRs with AI scoring. You pick the winner and
+                    trigger the payout.
+                  </span>
+                </span>
+              </div>
+            </div>
           </div>
 
           {error && <div className="form-error">{error}</div>}

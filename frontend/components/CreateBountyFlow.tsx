@@ -60,6 +60,11 @@ export type CreateBountyData = {
   releaseMode: ReleaseMode;
   rejectThreshold?: number | null;
   evaluationCriteria?: string | null;
+  /**
+   * GHB-184: cap opcional. null = sin cap. Persisted to
+   * `bounty_meta.max_submissions`.
+   */
+  maxSubmissions?: number | null;
 };
 
 type Step = "confirm" | "processing" | "success" | "error";
@@ -257,6 +262,7 @@ export function CreateBountyFlow({
         releaseMode: data.releaseMode === "auto" ? "auto" : "assisted",
         rejectThreshold: data.rejectThreshold ?? null,
         evaluationCriteria: data.evaluationCriteria ?? null,
+        maxSubmissions: data.maxSubmissions ?? null,
         createdByUserId: user.id,
       });
 

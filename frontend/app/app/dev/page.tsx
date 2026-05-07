@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Guard } from "@/components/Guard";
-import { BountyRow } from "@/components/BountyRow";
+import { BountyRow, visualStatus } from "@/components/BountyRow";
 import { SubmitPRModal } from "@/components/SubmitPRModal";
 import { useAuth } from "@/lib/auth";
 import { fetchMarketplace, fetchSubmissionsByDev } from "@/lib/data";
@@ -303,10 +303,19 @@ function DevDashboardInner() {
                 </span>
               );
             } else {
+              // GHB-184: bounty cap-reached → disable Submit PR. Tooltip explains
+              // why so the dev doesn't keep clicking.
+              const capReached = visualStatus(b) === "cap_reached";
               action = (
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => setModalFor(b)}
+                  disabled={capReached}
+                  title={
+                    capReached
+                      ? "Este bounty ya recibió el máximo de PRs. La company está revisando."
+                      : undefined
+                  }
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="6" cy="6" r="3" />

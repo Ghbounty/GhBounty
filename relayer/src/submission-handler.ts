@@ -10,9 +10,13 @@ import {
   getSubmittedByUserId,
   insertEvaluation,
   insertNotification,
+  isBountyOpenForSubmissions,
   markAutoRejected,
-  markScored,
+  markCapWarningSent,
+  markScoredAndCheckCap,
   recomputeRanking,
+  sendCapApproachingNotif,
+  sendCapReachedNotif,
   upsertAutoRejectReview,
   upsertSubmission,
 } from "./db/ops.js";
@@ -102,6 +106,12 @@ export async function handleSubmission(
     prUrl: sub.prUrl,
   });
 
+  // The three pre-Opus DB lookups (open-state, criteria, threshold) all key
+  // off the same bounty PDA and have no data dependency on each other. We
+  // hoist threshold up here too — its value isn't consumed until after the
+  // analyzer, but pulling it now collapses three round-trips into one.
+  let criteria: string | null = null;
+  let threshold: number | null = null;
   if (deps.db) {
     await upsertSubmission(deps.db, {
       chainId: deps.chainId,
@@ -112,14 +122,30 @@ export async function handleSubmission(
       prUrl: sub.prUrl,
       opusReportHashHex: Buffer.from(sub.opusReportHash).toString("hex"),
     });
-  }
 
-  // GHB-98: pull company-defined evaluation criteria before analyzing so the
-  // Opus prompt incorporates it. Falls back to the default rubric inside the
-  // analyzer when null/empty.
-  const criteria = deps.db
-    ? await getEvaluationCriteria(deps.db, sub.bounty.toBase58())
-    : null;
+    const [open, criteriaRes, thresholdRes] = await Promise.all([
+      isBountyOpenForSubmissions(deps.db, sub.bounty.toBase58()),
+      getEvaluationCriteria(deps.db, sub.bounty.toBase58()),
+      getRejectThreshold(deps.db, sub.bounty.toBase58()),
+    ]);
+    criteria = criteriaRes;
+    threshold = thresholdRes;
+
+    if (!open) {
+      log.info("submission arrived after cap or closure; skipping scoring", {
+        submission: sub.pda.toBase58(),
+        bounty: sub.bounty.toBase58(),
+      });
+      await markAutoRejected(deps.db, sub.pda.toBase58());
+      return {
+        score: 0,
+        outcome: "auto_rejected",
+        threshold,
+        source: "stub",
+        txHash: "bounty_closed",
+      };
+    }
+  }
 
   // GHB-73: spin up the sandbox + run the PR's tests BEFORE asking Sonnet
   // to score, so Sonnet's prompt includes a real pass/fail signal. The
@@ -145,24 +171,12 @@ export async function handleSubmission(
     },
   );
 
-  // ── Threshold + auto-reject mark FIRST ─────────────────────────────────
-  //
-  // Bug we're fixing: we used to call `setScore` first, then mark the
-  // submission auto_rejected. If `setScore` threw (UnauthorizedScorer on
-  // bounties created with a stale scorer pubkey, devnet RPC blip, etc.)
-  // the handler crashed and NEVER wrote the auto_rejected flag — the
-  // company's review modal kept showing low-score PRs forever because
-  // `submission_reviews.auto_rejected = false` (default).
-  //
-  // Now we compute the outcome + write the off-chain mark BEFORE the
-  // on-chain call. The off-chain mark is what the company UI reads;
-  // the on-chain set_score is for the program's view of the world. The
-  // two are independent — failing one doesn't and shouldn't unmark the
-  // other.
-  let threshold: number | null = null;
+  // We mark the submission off-chain BEFORE calling set_score. If set_score
+  // throws (UnauthorizedScorer on bounties created with a stale scorer
+  // pubkey, devnet RPC blip, etc.) the off-chain mark — what the company UI
+  // reads — is already in place.
   let outcome: ThresholdOutcome = "pass";
   if (deps.db) {
-    threshold = await getRejectThreshold(deps.db, sub.bounty.toBase58());
     outcome = classifyByThreshold(score, threshold);
     if (outcome === "auto_rejected") {
       log.info("submission auto-rejected by threshold", {
@@ -172,7 +186,24 @@ export async function handleSubmission(
       });
       await markAutoRejected(deps.db, sub.pda.toBase58());
     } else {
-      await markScored(deps.db, sub.pda.toBase58());
+      // GHB-184: atomic claim. The CTE bumps review_eligible_count and (if
+      // we just hit the cap) stamps closed_by_cap_at. A race-loser receives
+      // applied=false; we then auto_reject so the dev sees a coherent outcome.
+      const cap = await markScoredAndCheckCap(
+        deps.db,
+        sub.pda.toBase58(),
+        sub.bounty.toBase58(),
+      );
+      if (!cap.applied) {
+        log.info("cap reached; submission auto_rejected post-scoring", {
+          submission: sub.pda.toBase58(),
+          bounty: sub.bounty.toBase58(),
+        });
+        await markAutoRejected(deps.db, sub.pda.toBase58());
+        outcome = "auto_rejected";
+      } else {
+        await emitCapNotifsIfNeeded(deps.db, sub.bounty.toBase58(), cap);
+      }
     }
   }
 
@@ -297,6 +328,60 @@ export async function handleSubmission(
   }
 
   return { score, outcome, threshold, source, txHash };
+}
+
+/**
+ * GHB-184: emit at most one of `bounty_cap_reached` / `bounty_cap_approaching`
+ * after a successful slot claim. Best-effort — a failed notif must never
+ * un-do the scoring that already happened.
+ */
+async function emitCapNotifsIfNeeded(
+  db: NonNullable<SubmissionHandlerDeps["db"]>,
+  bountyPda: string,
+  cap: Awaited<ReturnType<typeof markScoredAndCheckCap>>,
+): Promise<void> {
+  if (!cap.bountyOwnerUserId || !cap.issueId) return;
+  if (typeof cap.maxSubmissions !== "number" || cap.maxSubmissions <= 0) return;
+  if (typeof cap.reviewEligibleCount !== "number") return;
+
+  const owner = cap.bountyOwnerUserId;
+  const issueId = cap.issueId;
+  const max = cap.maxSubmissions;
+  const eligible = cap.reviewEligibleCount;
+
+  if (cap.justClosed) {
+    log.info("bounty closed by cap", { bounty: bountyPda, max });
+    try {
+      await sendCapReachedNotif(db, {
+        bountyOwnerUserId: owner,
+        issueId,
+        bountyTitle: cap.bountyTitle ?? null,
+        maxSubmissions: max,
+      });
+    } catch (err) {
+      log.warn("cap_reached notif failed", { bounty: bountyPda, err: String(err) });
+    }
+    return;
+  }
+
+  // First crossing of 80% — gated by cap_warning_sent_at to avoid duplicates.
+  const eightyPct = Math.ceil(max * 0.8);
+  const justCrossed80 =
+    cap.capWarningSentAt === null && eligible >= eightyPct && eligible < max;
+  if (!justCrossed80) return;
+
+  try {
+    await sendCapApproachingNotif(db, {
+      bountyOwnerUserId: owner,
+      issueId,
+      bountyTitle: cap.bountyTitle ?? null,
+      reviewEligibleCount: eligible,
+      maxSubmissions: max,
+    });
+    await markCapWarningSent(db, issueId);
+  } catch (err) {
+    log.warn("cap_approaching notif failed", { bounty: bountyPda, err: String(err) });
+  }
 }
 
 /**

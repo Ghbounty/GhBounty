@@ -50,6 +50,8 @@ export type InsertIssueAndMetaParams = {
   rejectThreshold?: number | null;
   /** Free-form criteria injected into the Opus prompt. Null = use default. */
   evaluationCriteria?: string | null;
+  /** GHB-184: cap opcional de submissions. Null = sin cap. */
+  maxSubmissions?: number | null;
   /** Privy DID of the company user — links the row to the profile. */
   createdByUserId: string;
 };
@@ -97,6 +99,7 @@ export async function insertIssueAndMeta(
     created_by_user_id: p.createdByUserId,
     reject_threshold: p.rejectThreshold ?? null,
     evaluation_criteria: p.evaluationCriteria ?? null,
+    max_submissions: p.maxSubmissions ?? null,
   });
 
   if (metaErr) {
@@ -149,6 +152,35 @@ export async function deleteIssueAndMeta(
 }
 
 /**
+ * GHB-184: edit the off-chain cap on a bounty.
+ *
+ * Clears `closed_by_cap_at` only when the new cap leaves room (or is null),
+ * so a cap-closed bounty reopens automatically when the company raises it.
+ * The relayer is the source of truth for setting that flag — this helper
+ * only ever nulls it.
+ */
+export async function updateBountyCap(
+  supabase: DBClient,
+  issueId: string,
+  maxSubmissions: number | null,
+  currentReviewEligibleCount: number,
+): Promise<void> {
+  const reopens =
+    maxSubmissions === null || maxSubmissions > currentReviewEligibleCount;
+  const updates: {
+    max_submissions: number | null;
+    closed_by_cap_at?: null;
+  } = { max_submissions: maxSubmissions };
+  if (reopens) updates.closed_by_cap_at = null;
+
+  const { error } = await supabase
+    .from("bounty_meta")
+    .update(updates)
+    .eq("issue_id", issueId);
+  if (error) throw new Error(`updateBountyCap: ${error.message}`);
+}
+
+/**
  * Mark a bounty as closed in `bounty_meta.closed_by_user`. The on-chain
  * bounty stays Open — funds remain locked until someone calls
  * `cancel_bounty` or `resolve_bounty`. UI hides closed rows from the
@@ -184,6 +216,8 @@ export async function listMyIssues(supabase: DBClient, userId: string) {
       closed_by_user,
       reject_threshold,
       evaluation_criteria,
+      max_submissions,
+      closed_by_cap_at,
       created_at,
       issues (
         chain_id,
@@ -195,6 +229,7 @@ export async function listMyIssues(supabase: DBClient, userId: string) {
         amount,
         state,
         submission_count,
+        review_eligible_count,
         winner,
         github_issue_url,
         created_at

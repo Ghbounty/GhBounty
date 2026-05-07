@@ -4,9 +4,16 @@
 
 import Link from "next/link";
 import { Avatar } from "./Avatar";
-import { StatusBadge } from "./StatusBadge";
+import { StatusBadge, type StatusBadgeStatus } from "./StatusBadge";
 import { UsdcIcon } from "./UsdcIcon";
 import type { Bounty, Company } from "@/lib/types";
+
+// Exported so callers gating on `cap_reached` (e.g. the dev page's Submit
+// PR button) don't duplicate the rule.
+export function visualStatus(bounty: Bounty): StatusBadgeStatus {
+  if (bounty.closedByCap) return "cap_reached";
+  return bounty.status;
+}
 
 export function BountyRow({
   bounty,
@@ -87,7 +94,7 @@ export function BountyRow({
               );
             })()
           )}
-          <StatusBadge status={bounty.status} />
+          <StatusBadge status={visualStatus(bounty)} />
         </div>
       </div>
       <a

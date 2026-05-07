@@ -34,7 +34,18 @@ export type NotificationKind =
    * /app/profile entry. Emitted by `recordWinnerOnchain` to every dev
    * who submitted a PR to the bounty other than the winner.
    */
-  | "bounty_resolved_other";
+  | "bounty_resolved_other"
+  /**
+   * GHB-184: bounty crossed 80% of its `max_submissions` cap. Heads-up to
+   * the company so they can raise the cap before it auto-closes. Emitted
+   * once per bounty by the relayer (gated by `bounty_meta.cap_warning_sent_at`).
+   */
+  | "bounty_cap_approaching"
+  /**
+   * GHB-184: bounty hit `max_submissions`; the relayer set `closed_by_cap_at`
+   * and stopped accepting new PRs. Emitted by the relayer to the company.
+   */
+  | "bounty_cap_reached";
 
 export type NotificationPayload = {
   /** Bounty title (issue title, if set), for inline rendering. */
@@ -59,6 +70,13 @@ export type NotificationPayload = {
   companyAvatarUrl?: string;
   /** Company id, used to deep-link the notif row to the company page. */
   companyId?: string;
+  /**
+   * GHB-184: review-eligible counter at the moment the cap_approaching notif
+   * was emitted. Lets the bell render "5 of 6 PRs" without re-querying.
+   */
+  reviewEligibleCount?: number;
+  /** GHB-184: max_submissions value at the moment the cap notif fired. */
+  maxSubmissions?: number;
 };
 
 export type Notification = {

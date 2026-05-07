@@ -4,13 +4,12 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { parseIssueUrl } from "@/lib/github";
 import { CreateBountyFlow, type CreateBountyData } from "./CreateBountyFlow";
-import { ReleaseModePicker } from "./ReleaseModePicker";
 import { DepositModal } from "./DepositModal";
 import { WithdrawModal } from "./WithdrawModal";
 import { getConnection } from "@/lib/solana";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { usePrivyBackend } from "@/lib/auth-context";
-import type { Company, ReleaseMode } from "@/lib/types";
+import type { Company } from "@/lib/types";
 
 export function CreateBountyForm({
   company,
@@ -27,7 +26,6 @@ export function CreateBountyForm({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [flowData, setFlowData] = useState<CreateBountyData | null>(null);
-  const [releaseMode, setReleaseMode] = useState<ReleaseMode>("auto");
   const [balanceSol, setBalanceSol] = useState<number | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
@@ -80,6 +78,9 @@ export function CreateBountyForm({
     const criteria = (
       f.elements.namedItem("evaluationCriteria") as HTMLTextAreaElement
     )?.value.trim();
+    const maxSubsRaw = (
+      f.elements.namedItem("maxSubmissions") as HTMLInputElement
+    )?.value;
 
     const parsed = parseIssueUrl(url);
     if (!parsed) {
@@ -104,6 +105,17 @@ export function CreateBountyForm({
       rejectThreshold = n;
     }
 
+    // GHB-184: Max PRs is optional. Null = sin cap.
+    let maxSubmissions: number | null = null;
+    if (maxSubsRaw && maxSubsRaw.length > 0) {
+      const n = Number(maxSubsRaw);
+      if (!Number.isInteger(n) || n < 1) {
+        setError("Max PRs must be a positive integer.");
+        return;
+      }
+      maxSubmissions = n;
+    }
+
     // Also block the submit if the user is trying to lock more than they
     // have. Tx would fail in the wallet anyway, but a client-side guard
     // saves a popup + a failed network round-trip.
@@ -121,9 +133,13 @@ export function CreateBountyForm({
       title: title || undefined,
       description: description || undefined,
       amount,
-      releaseMode,
+      // GHB-184: Release Mode picker is hidden in the UI but the column
+      // stays in the schema. Hardcoding 'assisted' here matches the new
+      // default and lets us re-enable user choice later without a migration.
+      releaseMode: "assisted",
       rejectThreshold,
       evaluationCriteria: criteria || null,
+      maxSubmissions,
     });
   }
 
@@ -237,6 +253,27 @@ export function CreateBountyForm({
             step={0.001}
             placeholder="0.5"
             required
+            onKeyDown={(e) => {
+              // GHB-184: hard-block letters/symbols. type="number" alone lets
+              // through 'e', '+', '-' (Chrome) and full pasted strings.
+              if (
+                e.key.length > 1 ||
+                e.ctrlKey ||
+                e.metaKey
+              ) {
+                return;
+              }
+              if (/^[0-9]$/.test(e.key)) return;
+              if (e.key === "." && !(e.currentTarget.value ?? "").includes(".")) return;
+              e.preventDefault();
+            }}
+            onPaste={(e) => {
+              const pasted = e.clipboardData.getData("text").trim();
+              if (!/^\d+(\.\d+)?$/.test(pasted)) {
+                e.preventDefault();
+                setError("Numbers only (e.g. 0.5)");
+              }
+            }}
           />
         </label>
 
@@ -249,9 +286,29 @@ export function CreateBountyForm({
           />
         </label>
 
+        {/* GHB-184: read-only display of the active release mode. We keep
+            the picker component reserved for the future when auto-release
+            is mature enough to re-enable. For now there's only one mode,
+            but we still surface it so companies see how reviews work. */}
         <div className="field">
           <span className="field-label">Release mode</span>
-          <ReleaseModePicker value={releaseMode} onChange={setReleaseMode} compact />
+          <div className="release-picker compact">
+            <div className="release-opt static">
+              <span className="release-opt-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+              </span>
+              <span className="release-opt-body">
+                <span className="release-opt-title">AI-assisted review</span>
+                <span className="release-opt-desc">
+                  Receive many PRs with AI scoring. You pick the winner and
+                  trigger the payout.
+                </span>
+              </span>
+            </div>
+          </div>
         </div>
 
         <label className="field">
@@ -263,6 +320,35 @@ export function CreateBountyForm({
             max={10}
             step={1}
             placeholder="8"
+          />
+        </label>
+
+        <label className="field">
+          <span className="field-label">Max PRs to review (optional)</span>
+          <input
+            name="maxSubmissions"
+            type="number"
+            min={1}
+            step={1}
+            placeholder="No limit (optional)"
+            onKeyDown={(e) => {
+              if (
+                e.key.length > 1 ||
+                e.ctrlKey ||
+                e.metaKey
+              ) {
+                return;
+              }
+              if (/^[0-9]$/.test(e.key)) return;
+              e.preventDefault();
+            }}
+            onPaste={(e) => {
+              const pasted = e.clipboardData.getData("text").trim();
+              if (!/^\d+$/.test(pasted)) {
+                e.preventDefault();
+                setError("Max PRs only accepts positive integers.");
+              }
+            }}
           />
         </label>
 

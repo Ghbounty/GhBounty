@@ -201,6 +201,8 @@ type IssueRow = {
   amount: number | string; // bigint may come over wire as string
   state: "open" | "resolved" | "cancelled";
   submission_count: number;
+  // GHB-184: scored+winner counter; null in mocks, treat as 0.
+  review_eligible_count: number | null;
   created_at: string;
   bounty_meta: {
     title: string | null;
@@ -209,11 +211,15 @@ type IssueRow = {
     closed_by_user: boolean;
     created_by_user_id: string | null;
     reject_threshold: number | null;
+    max_submissions: number | null;
+    closed_by_cap_at: string | null;
   } | null;
 };
 
+// `cap_warning_sent_at` lives only in `bounty_meta` for relayer-side gating
+// — the frontend never reads it, so we keep it out of the public select.
 const ISSUE_SELECT =
-  "id, pda, github_issue_url, amount, state, submission_count, created_at, bounty_meta(title, description, release_mode, closed_by_user, created_by_user_id, reject_threshold)";
+  "id, pda, github_issue_url, amount, state, submission_count, review_eligible_count, created_at, bounty_meta(title, description, release_mode, closed_by_user, created_by_user_id, reject_threshold, max_submissions, closed_by_cap_at)";
 
 /** Parse "https://github.com/<owner>/<repo>/issues/<n>" → repo + number. */
 function parseGithubIssueUrl(url: string): { repo: string; issueNumber: number } {
@@ -239,8 +245,12 @@ function deriveStatus(
   closedByUser: boolean,
   submissionCount: number,
   hasApprovedSubmission: boolean,
+  closedByCap: boolean,
 ): BountyStatus {
   if (closedByUser) return "closed";
+  // GHB-184: cap-closed bounties surface as "closed" at the BountyStatus level.
+  // The dedicated "cap_reached" badge is computed downstream in BountyRow.
+  if (closedByCap) return "closed";
   if (state === "cancelled") return "closed";
   if (state === "resolved" || hasApprovedSubmission) return "paid";
   if (submissionCount > 0) return "reviewing";
@@ -269,6 +279,7 @@ function rowToBounty(
   // mirror column for callers that haven't joined yet (mock data,
   // single-row fetch where the join would be wasteful).
   const effectiveCount = submissionCount ?? row.submission_count;
+  const closedByCap = meta?.closed_by_cap_at != null;
   return {
     id: row.id,
     pda: row.pda,
@@ -283,10 +294,14 @@ function rowToBounty(
       meta?.closed_by_user ?? false,
       effectiveCount,
       hasApprovedSubmission,
+      closedByCap,
     ),
     releaseMode: meta?.release_mode ?? "auto",
     submissionCount: effectiveCount,
     rejectThreshold: meta?.reject_threshold ?? null,
+    maxSubmissions: meta?.max_submissions ?? null,
+    reviewEligibleCount: row.review_eligible_count ?? 0,
+    closedByCap,
     createdAt: new Date(row.created_at).getTime(),
   };
 }

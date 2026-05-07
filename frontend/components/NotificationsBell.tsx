@@ -307,6 +307,39 @@ function renderNotification(n: Notification): {
         body: "Your PR didn't win this one. Thanks for participating.",
         accent: "resolved-other",
       };
+    case "bounty_cap_approaching": {
+      // GHB-184: heads-up at 80% of cap. Body shows the live counter so the
+      // company can decide whether to raise the cap before it auto-closes.
+      const eligible = n.payload.reviewEligibleCount;
+      const max = n.payload.maxSubmissions;
+      const detail =
+        typeof eligible === "number" && typeof max === "number"
+          ? `${eligible} of ${max} PRs received. Subí el cap si querés más opciones.`
+          : "Casi alcanzaste el cap de PRs.";
+      return {
+        title: bountyTitle
+          ? `"${bountyTitle}" is close to its cap`
+          : "Bounty close to its PR cap",
+        body: detail,
+        accent: "info",
+      };
+    }
+    case "bounty_cap_reached": {
+      // GHB-184: bounty was auto-closed by the cap. Tell the company to
+      // start reviewing — no new PRs will arrive.
+      const max = n.payload.maxSubmissions;
+      const detail =
+        typeof max === "number"
+          ? `Llegó al máximo de ${max} PRs. Revisá las submissions pendientes.`
+          : "Bounty cerrado por cap. Revisá las submissions pendientes.";
+      return {
+        title: bountyTitle
+          ? `"${bountyTitle}" closed by cap`
+          : "Bounty closed by cap",
+        body: detail,
+        accent: "info",
+      };
+    }
   }
 }
 

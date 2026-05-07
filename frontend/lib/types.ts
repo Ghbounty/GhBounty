@@ -73,6 +73,16 @@ export type Bounty = {
    * `bounty_meta.reject_threshold`.
    */
   rejectThreshold?: number | null;
+  /** GHB-184: optional submission cap. `null` = unlimited. */
+  maxSubmissions?: number | null;
+  /** GHB-184: count of submissions in `scored` or `winner` state. */
+  reviewEligibleCount?: number;
+  /**
+   * GHB-184: off-chain flag set when the cap was hit. Drives the
+   * `cap_reached` badge and disables Submit PR — `issues.state` stays
+   * untouched so it keeps mirroring on-chain reality.
+   */
+  closedByCap?: boolean;
   createdAt: number;
 };
 
