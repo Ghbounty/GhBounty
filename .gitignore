@@ -50,3 +50,7 @@ Cargo.lock
 bounty_judge/.venv/
 bounty_judge/.pytest_cache/
 .vercel
+
+# Stake authority keypairs — generated locally per developer
+contracts/solana/keys/*.json
+!contracts/solana/keys/.gitkeep

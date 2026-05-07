@@ -11,7 +11,7 @@
  * test so a regression in any one path shows up as a focused failure.
  */
 
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   generateKeyPair,
   SignJWT,
@@ -212,7 +212,7 @@ describe("handleSponsorRequest — 200 ok", () => {
     const { deps, logs } = makeDeps({ resolver, station });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -237,7 +237,7 @@ describe("handleSponsorRequest — 401 auth failures", () => {
     const { deps, logs } = makeDeps({ resolver });
 
     const res = await handleSponsorRequest(
-      { authorization: null, body: VALID_BODY },
+      { authorization: null, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -251,7 +251,7 @@ describe("handleSponsorRequest — 401 auth failures", () => {
     const { deps, logs } = makeDeps({ resolver });
 
     const res = await handleSponsorRequest(
-      { authorization: "Basic xyz", body: VALID_BODY },
+      { authorization: "Basic xyz", mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -266,7 +266,7 @@ describe("handleSponsorRequest — 401 auth failures", () => {
     const { deps, logs } = makeDeps({ resolver });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -284,7 +284,7 @@ describe("handleSponsorRequest — 401 auth failures", () => {
     const { deps } = makeDeps({ resolver });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
     expect(res.status).toBe(401);
@@ -300,7 +300,7 @@ describe("handleSponsorRequest — 401 auth failures", () => {
     const { deps } = makeDeps({ resolver });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
     expect(res.status).toBe(401);
@@ -316,7 +316,7 @@ describe("handleSponsorRequest — 400 bad request", () => {
     const { deps, logs } = makeDeps({ resolver });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: { chainId: "solana-devnet" } },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: { chainId: "solana-devnet" } },
       deps,
     );
 
@@ -334,7 +334,7 @@ describe("handleSponsorRequest — 400 bad request", () => {
     const { deps } = makeDeps({ resolver });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: null },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: null },
       deps,
     );
 
@@ -357,7 +357,7 @@ describe("handleSponsorRequest — 422 validator rejected", () => {
     const { deps, logs } = makeDeps({ resolver, station });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -383,7 +383,7 @@ describe("handleSponsorRequest — 503 insufficient reserve", () => {
     });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -406,7 +406,7 @@ describe("handleSponsorRequest — 503 insufficient reserve", () => {
     });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -424,7 +424,7 @@ describe("handleSponsorRequest — 503 insufficient reserve", () => {
     });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -446,7 +446,7 @@ describe("handleSponsorRequest — 500 errors", () => {
     const { deps, logs } = makeDeps({ resolver, station });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
@@ -466,12 +466,120 @@ describe("handleSponsorRequest — 500 errors", () => {
     const { deps, logs } = makeDeps({ resolver, station });
 
     const res = await handleSponsorRequest(
-      { authorization: `Bearer ${token}`, body: VALID_BODY },
+      { authorization: `Bearer ${token}`, mcpServiceToken: null, body: VALID_BODY },
       deps,
     );
 
     expect(res.status).toBe(500);
     expect(logs[0]?.outcome).toBe("internal_error");
     expect(logs[0]?.reason).toContain("boom");
+  });
+});
+
+// ── handler: MCP service-token auth ─────────────────────────────────
+
+describe("handleSponsorRequest — MCP x-mcp-service-token auth", () => {
+  const SERVICE_TOKEN = "super-secret-token-abc123";
+
+  beforeEach(() => {
+    process.env.GAS_STATION_SERVICE_TOKEN = SERVICE_TOKEN;
+  });
+
+  afterEach(() => {
+    delete process.env.GAS_STATION_SERVICE_TOKEN;
+  });
+
+  test("valid x-mcp-service-token bypasses Privy and sponsors successfully", async () => {
+    const { resolver } = await makeKeys();
+    const station = makeStation({ txHash: "mcp-sig", durationMs: 10 });
+    const { deps, logs } = makeDeps({ resolver, station });
+
+    const res = await handleSponsorRequest(
+      {
+        authorization: null, // no Privy token — MCP never sends one
+        mcpServiceToken: SERVICE_TOKEN,
+        body: VALID_BODY,
+      },
+      deps,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.txHash).toBe("mcp-sig");
+    expect(station.sponsor).toHaveBeenCalledOnce();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({
+      privyDid: "mcp-service",
+      status: 200,
+      outcome: "ok",
+      txHash: "mcp-sig",
+    });
+  });
+
+  test("mismatched x-mcp-service-token → 401 with reason", async () => {
+    const { resolver } = await makeKeys();
+    const station = makeStation({ txHash: "should-not-be-called", durationMs: 0 });
+    const { deps, logs } = makeDeps({ resolver, station });
+
+    const res = await handleSponsorRequest(
+      {
+        authorization: null,
+        mcpServiceToken: "wrong-token",
+        body: VALID_BODY,
+      },
+      deps,
+    );
+
+    expect(res.status).toBe(401);
+    expect(res.body.reason).toContain("invalid MCP service token");
+    expect(station.sponsor).not.toHaveBeenCalled();
+    expect(logs[0]?.outcome).toBe("auth_failed");
+    expect(logs[0]?.privyDid).toBeNull();
+  });
+
+  test("x-mcp-service-token present but GAS_STATION_SERVICE_TOKEN env not set → 401", async () => {
+    delete process.env.GAS_STATION_SERVICE_TOKEN; // override beforeEach
+    const { resolver } = await makeKeys();
+    const station = makeStation({ txHash: "should-not-be-called", durationMs: 0 });
+    const { deps, logs } = makeDeps({ resolver, station });
+
+    const res = await handleSponsorRequest(
+      {
+        authorization: null,
+        mcpServiceToken: SERVICE_TOKEN,
+        body: VALID_BODY,
+      },
+      deps,
+    );
+
+    expect(res.status).toBe(401);
+    expect(res.body.reason).toContain("server not configured");
+    expect(station.sponsor).not.toHaveBeenCalled();
+    expect(logs[0]?.outcome).toBe("auth_failed");
+    expect(logs[0]?.privyDid).toBeNull();
+  });
+
+  test("no x-mcp-service-token header → falls through to Privy (existing path unchanged)", async () => {
+    // With env set but no MCP header, normal Privy auth must still work.
+    const { resolver, privateKey } = await makeKeys();
+    const station = makeStation({ txHash: "privy-sig", durationMs: 5 });
+    const { deps, logs } = makeDeps({ resolver, station });
+    const token = await signPrivyToken({ privateKey });
+
+    const res = await handleSponsorRequest(
+      {
+        authorization: `Bearer ${token}`,
+        mcpServiceToken: null,
+        body: VALID_BODY,
+      },
+      deps,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.txHash).toBe("privy-sig");
+    expect(logs[0]).toMatchObject({
+      privyDid: "did:privy:test_user",
+      status: 200,
+      outcome: "ok",
+    });
   });
 });

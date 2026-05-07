@@ -47,3 +47,26 @@ pub struct Submission {
     pub created_at: i64,
     pub bump: u8,
 }
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
+pub enum StakeStatus {
+    Active,
+    Frozen,
+    Slashed,
+    Refunded,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct StakeDeposit {
+    /// Owner / depositor wallet — refund destination.
+    pub owner: Pubkey,
+    /// Lamports currently held in the PDA (decremented on partial slash).
+    pub amount: u64,
+    pub status: StakeStatus,
+    /// Unix seconds at which `refund_stake_deposit` becomes valid.
+    pub locked_until: i64,
+    /// Unix seconds when the deposit was created.
+    pub created_at: i64,
+    pub bump: u8,
+}

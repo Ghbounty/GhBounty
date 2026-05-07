@@ -80,6 +80,7 @@ export async function POST(req: Request) {
   const result = await handleSponsorRequest(
     {
       authorization: req.headers.get("authorization"),
+      mcpServiceToken: req.headers.get("x-mcp-service-token"),
       body,
     },
     {
