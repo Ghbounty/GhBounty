@@ -191,6 +191,10 @@ export type Database = {
           max_submissions: number | null;
           closed_by_cap_at: string | null;
           cap_warning_sent_at: string | null;
+          // Review fee — total + locked-in cost per review (lamports). null
+          // on legacy bounties created before the fee feature shipped.
+          review_fee_lamports_paid: string | null;
+          review_fee_lamports_per_review: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -206,8 +210,34 @@ export type Database = {
           max_submissions?: number | null;
           closed_by_cap_at?: string | null;
           cap_warning_sent_at?: string | null;
+          // BIGINT comes over the wire as string; pass as string when writing.
+          review_fee_lamports_paid?: string | number | null;
+          review_fee_lamports_per_review?: string | number | null;
         };
         Update: Partial<Database["public"]["Tables"]["bounty_meta"]["Insert"]>;
+        Relationships: [];
+      };
+      treasury_refunds: {
+        Row: {
+          id: string;
+          bounty_pda: string;
+          kind: string;
+          // BIGINT serialised as string by Supabase.
+          lamports: string;
+          recipient_pubkey: string;
+          tx_hash: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          bounty_pda: string;
+          kind: string;
+          lamports: string | number;
+          recipient_pubkey: string;
+          tx_hash: string;
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["treasury_refunds"]["Insert"]>;
         Relationships: [];
       };
       submission_meta: {

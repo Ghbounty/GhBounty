@@ -52,6 +52,18 @@ export type InsertIssueAndMetaParams = {
   evaluationCriteria?: string | null;
   /** GHB-184: cap opcional de submissions. Null = sin cap. */
   maxSubmissions?: number | null;
+  /**
+   * Total review fee paid upfront in lamports
+   * (= max_submissions × cost_per_review_lamports × 2). Required when
+   * the cap is set; null on legacy/uncapped bounties.
+   */
+  reviewFeeLamportsPaid?: number | null;
+  /**
+   * Locked-in cost per review in lamports at creation time. Persists the
+   * SOL/USD rate so refunds use the same lamport unit even if the price
+   * has moved.
+   */
+  reviewFeeLamportsPerReview?: number | null;
   /** Privy DID of the company user — links the row to the profile. */
   createdByUserId: string;
 };
@@ -100,6 +112,16 @@ export async function insertIssueAndMeta(
     reject_threshold: p.rejectThreshold ?? null,
     evaluation_criteria: p.evaluationCriteria ?? null,
     max_submissions: p.maxSubmissions ?? null,
+    // BIGINT — pass as string to dodge JS Number 53-bit cap. Both fields
+    // are nullable for legacy bounties; treat 0/null the same on read.
+    review_fee_lamports_paid:
+      p.reviewFeeLamportsPaid != null
+        ? p.reviewFeeLamportsPaid.toString()
+        : null,
+    review_fee_lamports_per_review:
+      p.reviewFeeLamportsPerReview != null
+        ? p.reviewFeeLamportsPerReview.toString()
+        : null,
   });
 
   if (metaErr) {
@@ -218,6 +240,8 @@ export async function listMyIssues(supabase: DBClient, userId: string) {
       evaluation_criteria,
       max_submissions,
       closed_by_cap_at,
+      review_fee_lamports_paid,
+      review_fee_lamports_per_review,
       created_at,
       issues (
         chain_id,

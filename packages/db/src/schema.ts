@@ -293,6 +293,15 @@ export const bountyMeta = pgTable("bounty_meta", {
   // null/empty = relayer uses the default ("PR must address all
   // requirements, code clean and functional.").
   evaluationCriteria: text("evaluation_criteria"),
+  // Review fee — total lamports paid upfront to the treasury wallet at
+  // bounty-creation time. Equals max_submissions × cost_per_review × 2.
+  // null on legacy bounties created before the fee feature shipped.
+  reviewFeeLamportsPaid: bigint("review_fee_lamports_paid", { mode: "bigint" }),
+  // Locked-in cost per review (lamports) at creation time. Used to size
+  // refunds in the same lamport unit even if SOL/USD moves. null on legacy.
+  reviewFeeLamportsPerReview: bigint("review_fee_lamports_per_review", {
+    mode: "bigint",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .default(sql`now()`)
     .notNull(),
@@ -393,3 +402,29 @@ export const slashingEvents = pgTable("slashing_events", {
     .default(sql`now()`)
     .notNull(),
 });
+
+/* --- Treasury refunds: audit trail outliving bounty_meta -------- */
+//
+// Refunds happen via the /api/cancel-refund route after cancel_bounty
+// confirms on-chain. The row lives separately (no FK to bounty_meta) so it
+// survives `deleteIssueAndMeta` and a repeat-cancel attempt can detect the
+// existing refund via the (bounty_pda, kind) unique constraint and return
+// the prior tx hash instead of double-paying.
+export const treasuryRefunds = pgTable(
+  "treasury_refunds",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    bountyPda: text("bounty_pda").notNull(),
+    // 'cancel_refund' for now. Future kinds (e.g. 'expiry_refund') sit here.
+    kind: text("kind").notNull(),
+    lamports: bigint("lamports", { mode: "bigint" }).notNull(),
+    recipientPubkey: text("recipient_pubkey").notNull(),
+    txHash: text("tx_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .default(sql`now()`)
+      .notNull(),
+  },
+  (t) => ({
+    uniqueBountyKind: unique().on(t.bountyPda, t.kind),
+  }),
+);
