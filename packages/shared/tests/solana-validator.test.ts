@@ -13,6 +13,7 @@ import {
   ALLOWED_DISCRIMINATORS_HEX,
   ESCROW_PROGRAM_ID,
   MAX_FEE_LAMPORTS,
+  MAX_REVIEW_FEE_LAMPORTS,
   MAX_TOPUP_LAMPORTS,
   validateSolanaSponsorTx,
 } from "../src/gas-station/solana-validator";
@@ -472,6 +473,248 @@ describe("validateSolanaSponsorTx — topup transfer rejections", () => {
   });
 });
 
+// ── review-fee transfer (user → treasury, bundled with create_bounty) ─
+
+describe("validateSolanaSponsorTx — review-fee transfer happy paths", () => {
+  const TREASURY = Keypair.generate().publicKey;
+
+  // Build a create_bounty-shaped escrow ix that:
+  //   - has GAS_STATION at slot 0 (signer, fee payer)
+  //   - has USER at slot 1 (signer)
+  //   - has TREASURY in the account list (non-signer slot)
+  // so the review-fee transfer's source=USER and dest=TREASURY are
+  // both addressable from staticAccountKeys.
+  function escrowIxWithTreasury(
+    discriminatorHex: string,
+    feePayer: PublicKey,
+    user: PublicKey,
+    treasury: PublicKey,
+  ): TransactionInstruction {
+    return new TransactionInstruction({
+      programId: ESCROW_PROGRAM_ID,
+      keys: [
+        { pubkey: feePayer, isSigner: true, isWritable: true },
+        { pubkey: user, isSigner: true, isWritable: true },
+        // Treasury appears in the escrow ix accounts as a non-signer
+        // sink. In production this is just the System.transfer dest;
+        // referencing it from the escrow ix is the simplest way to get
+        // it into staticAccountKeys for the test.
+        { pubkey: treasury, isSigner: false, isWritable: true },
+      ],
+      data: Buffer.from(discriminatorHex, "hex"),
+    });
+  }
+
+  test("topup + review-fee + create_bounty → ok with both lamports surfaced", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: GAS_STATION,
+          toPubkey: USER,
+          lamports: 5_000_000, // rent + fee buffer
+        }),
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: TREASURY,
+          lamports: 1_000_000, // review fee
+        }),
+        escrowIxWithTreasury(
+          "7a5a0e8f087dc802",
+          GAS_STATION,
+          USER,
+          TREASURY,
+        ),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+      expectedTreasury: TREASURY,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.discriminatorHex).toBe("7a5a0e8f087dc802");
+      expect(r.topupLamports).toBe(5_000_000);
+      expect(r.reviewFeeLamports).toBe(1_000_000);
+    }
+  });
+
+  test("review-fee only (no topup) → ok with topupLamports===0", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: TREASURY,
+          lamports: 500_000,
+        }),
+        escrowIxWithTreasury(
+          "7a5a0e8f087dc802",
+          GAS_STATION,
+          USER,
+          TREASURY,
+        ),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+      expectedTreasury: TREASURY,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.topupLamports).toBe(0);
+      expect(r.reviewFeeLamports).toBe(500_000);
+    }
+  });
+
+  test("no review-fee ix, treasury configured → ok with reviewFeeLamports===0", () => {
+    const tx = buildTx([escrowIx("cbe99dbf4625cd00", GAS_STATION)], GAS_STATION);
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+      expectedTreasury: TREASURY,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.reviewFeeLamports).toBe(0);
+  });
+});
+
+describe("validateSolanaSponsorTx — review-fee transfer rejections", () => {
+  const TREASURY = Keypair.generate().publicKey;
+
+  function escrowIxWithDest(
+    discriminatorHex: string,
+    feePayer: PublicKey,
+    user: PublicKey,
+    extra: PublicKey,
+  ): TransactionInstruction {
+    return new TransactionInstruction({
+      programId: ESCROW_PROGRAM_ID,
+      keys: [
+        { pubkey: feePayer, isSigner: true, isWritable: true },
+        { pubkey: user, isSigner: true, isWritable: true },
+        { pubkey: extra, isSigner: false, isWritable: true },
+      ],
+      data: Buffer.from(discriminatorHex, "hex"),
+    });
+  }
+
+  test("review-fee dest is NOT the configured treasury → review_fee_transfer_invalid", () => {
+    const ATTACKER = Keypair.generate().publicKey;
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: ATTACKER, // attacker, not treasury
+          lamports: 1_000_000,
+        }),
+        escrowIxWithDest(
+          "7a5a0e8f087dc802",
+          GAS_STATION,
+          USER,
+          ATTACKER,
+        ),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+      expectedTreasury: TREASURY,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("review_fee_transfer_invalid");
+      expect(r.reason).toContain("does not match configured treasury");
+    }
+  });
+
+  test("review-fee amount > MAX_REVIEW_FEE_LAMPORTS → review_fee_transfer_invalid", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: TREASURY,
+          lamports: MAX_REVIEW_FEE_LAMPORTS + 1,
+        }),
+        escrowIxWithDest(
+          "7a5a0e8f087dc802",
+          GAS_STATION,
+          USER,
+          TREASURY,
+        ),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+      expectedTreasury: TREASURY,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("review_fee_transfer_invalid");
+      expect(r.reason).toContain("exceeds cap");
+    }
+  });
+
+  test("two review-fee transfers → multiple_review_fee_transfers", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: TREASURY,
+          lamports: 100_000,
+        }),
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: TREASURY,
+          lamports: 100_000,
+        }),
+        escrowIxWithDest(
+          "7a5a0e8f087dc802",
+          GAS_STATION,
+          USER,
+          TREASURY,
+        ),
+      ],
+      GAS_STATION,
+    );
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+      expectedTreasury: TREASURY,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.code).toBe("multiple_review_fee_transfers");
+  });
+
+  test("treasury NOT configured + non-topup transfer → topup_transfer_invalid (legacy behaviour)", () => {
+    const tx = buildTx(
+      [
+        SystemProgram.transfer({
+          fromPubkey: USER,
+          toPubkey: TREASURY,
+          lamports: 1_000_000,
+        }),
+        escrowIxWithDest(
+          "7a5a0e8f087dc802",
+          GAS_STATION,
+          USER,
+          TREASURY,
+        ),
+      ],
+      GAS_STATION,
+    );
+    // No expectedTreasury → review-fee shape isn't recognised, falls
+    // through to the legacy topup-source rejection.
+    const r = validateSolanaSponsorTx(toB64(tx), {
+      expectedFeePayer: GAS_STATION,
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.code).toBe("topup_transfer_invalid");
+      expect(r.reason).toContain("source must be the fee payer");
+    }
+  });
+});
+
 // ── exhaustive rejection-code coverage check ─────────────────────────
 
 describe("validateSolanaSponsorTx — sanity", () => {
@@ -491,5 +734,9 @@ describe("validateSolanaSponsorTx — sanity", () => {
 
   test("MAX_TOPUP_LAMPORTS is the documented 0.05 SOL cap", () => {
     expect(MAX_TOPUP_LAMPORTS).toBe(50_000_000);
+  });
+
+  test("MAX_REVIEW_FEE_LAMPORTS is the documented 0.2 SOL cap", () => {
+    expect(MAX_REVIEW_FEE_LAMPORTS).toBe(200_000_000);
   });
 });
