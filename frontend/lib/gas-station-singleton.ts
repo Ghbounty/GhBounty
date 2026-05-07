@@ -17,9 +17,12 @@
  * Optional:
  *   GAS_STATION_MIN_RESERVE_LAMPORTS  (default 50_000)
  *   GAS_STATION_CONFIRM_TIMEOUT_MS    (default 60_000)
+ *   TREASURY_PUBKEY                   (review-fee feature; when unset
+ *                                     the validator rejects review-fee
+ *                                     transfers and only topup is allowed)
  */
 
-import { Connection, type PublicKey } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import {
   loadGasStationKeypair,
   makeConnectionRpcSubmitter,
@@ -62,6 +65,21 @@ export function getSolanaSingleton(): SolanaSingleton {
     60_000,
   );
 
+  // Treasury pubkey is only needed for the review-fee feature. When
+  // unset, the validator rejects any non-topup System.Transfer (so the
+  // gas station still works for the legacy 4 ixs without the feature).
+  const treasuryRaw = process.env.TREASURY_PUBKEY?.trim();
+  let treasuryPubkey: PublicKey | undefined;
+  if (treasuryRaw) {
+    try {
+      treasuryPubkey = new PublicKey(treasuryRaw);
+    } catch (err) {
+      throw new Error(
+        `TREASURY_PUBKEY is not a valid Solana pubkey: ${(err as Error).message}`,
+      );
+    }
+  }
+
   const connection = new Connection(rpcUrl, "confirmed");
   const rpc = makeConnectionRpcSubmitter(connection, "confirmed");
   const station = new SolanaGasStation({
@@ -69,6 +87,7 @@ export function getSolanaSingleton(): SolanaSingleton {
     keypair,
     rpc,
     confirmTimeoutMs,
+    ...(treasuryPubkey !== undefined && { treasuryPubkey }),
   });
 
   cached = {
