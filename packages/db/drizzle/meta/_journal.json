@@ -15,6 +15,13 @@
       "when": 1778080551809,
       "tag": "0018_mcp_agent_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778100000000,
+      "tag": "0019_max_submissions_cap",
+      "breakpoints": true
     }
   ]
 }
