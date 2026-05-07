@@ -271,7 +271,7 @@ export function CreateBountyForm({
               const pasted = e.clipboardData.getData("text").trim();
               if (!/^\d+(\.\d+)?$/.test(pasted)) {
                 e.preventDefault();
-                setError("Solo números (ej: 0.5)");
+                setError("Numbers only (e.g. 0.5)");
               }
             }}
           />
@@ -285,6 +285,31 @@ export function CreateBountyForm({
             placeholder="What needs to be done, expected behavior, edge cases…"
           />
         </label>
+
+        {/* GHB-184: read-only display of the active release mode. We keep
+            the picker component reserved for the future when auto-release
+            is mature enough to re-enable. For now there's only one mode,
+            but we still surface it so companies see how reviews work. */}
+        <div className="field">
+          <span className="field-label">Release mode</span>
+          <div className="release-picker compact">
+            <div className="release-opt static">
+              <span className="release-opt-icon">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" />
+                </svg>
+              </span>
+              <span className="release-opt-body">
+                <span className="release-opt-title">AI-assisted review</span>
+                <span className="release-opt-desc">
+                  Receive many PRs with AI scoring. You pick the winner and
+                  trigger the payout.
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
 
         <label className="field">
           <span className="field-label">Reject threshold (1-10, optional)</span>
@@ -305,7 +330,7 @@ export function CreateBountyForm({
             type="number"
             min={1}
             step={1}
-            placeholder="Sin límite (opcional)"
+            placeholder="No limit (optional)"
             onKeyDown={(e) => {
               if (
                 e.key.length > 1 ||
@@ -321,7 +346,7 @@ export function CreateBountyForm({
               const pasted = e.clipboardData.getData("text").trim();
               if (!/^\d+$/.test(pasted)) {
                 e.preventDefault();
-                setError("Max PRs solo acepta enteros positivos.");
+                setError("Max PRs only accepts positive integers.");
               }
             }}
           />

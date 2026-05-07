@@ -1869,6 +1869,17 @@ section { position: relative; padding: 120px 40px; }
   background: rgba(0,229,209,0.05);
   box-shadow: 0 0 0 1px var(--accent), 0 6px 18px rgba(0,229,209,0.1);
 }
+/* GHB-184: read-only variant — neutral border, no glow, no hover affordance
+   since the option isn't a button. Reuses the layout/icon styles but stays
+   visually quiet so it doesn't compete with the form's required fields. */
+.release-opt.static { cursor: default; }
+.release-opt.static:hover { border-color: var(--border); }
+/* Drop the accent color from the icon — keeps the card visually neutral
+   alongside the rest of the form. */
+.release-opt.static .release-opt-icon {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+}
 .release-opt-icon {
   width: 32px; height: 32px; border-radius: 8px;
   background: rgba(0,229,209,0.08);

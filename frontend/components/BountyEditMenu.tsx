@@ -531,7 +531,7 @@ function BountyEditModal({
               min={Math.max(bounty.reviewEligibleCount ?? 0, 1)}
               step={1}
               defaultValue={bounty.maxSubmissions ?? ""}
-              placeholder="Sin límite (opcional)"
+              placeholder="No limit (optional)"
               onKeyDown={(e) => {
                 if (
                   e.key.length > 1 ||
@@ -543,10 +543,33 @@ function BountyEditModal({
               }}
             />
             <span className="field-hint">
-              Cuando se alcance este número, el bounty se cierra
-              automáticamente y deja de aceptar PRs.
+              When this number is reached, the bounty closes automatically
+              and stops accepting PRs.
             </span>
           </label>
+
+          {/* GHB-184: same read-only release mode display as in CreateBountyForm.
+              Kept here so editing a bounty surfaces the review flow consistently. */}
+          <div className="field">
+            <span className="field-label">Release mode</span>
+            <div className="release-picker compact">
+              <div className="release-opt static">
+                <span className="release-opt-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 7v5l3 2" />
+                  </svg>
+                </span>
+                <span className="release-opt-body">
+                  <span className="release-opt-title">AI-assisted review</span>
+                  <span className="release-opt-desc">
+                    Receive many PRs with AI scoring. You pick the winner and
+                    trigger the payout.
+                  </span>
+                </span>
+              </div>
+            </div>
+          </div>
 
           {error && <div className="form-error">{error}</div>}
 
