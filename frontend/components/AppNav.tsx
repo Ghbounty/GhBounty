@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { useAuth, usePrivyBackend } from "@/lib/auth-context";
 import { useWallets } from "@privy-io/react-auth/solana";
@@ -109,6 +109,30 @@ export function AppNav() {
     balanceSol !== null &&
     balanceSol > 0;
 
+  // Avatar dropdown (Profile / Log out). Mirrors the click-outside +
+  // Escape pattern from BountyEditMenu so the affordance is consistent
+  // across the app.
+  const [accountOpen, setAccountOpen] = useState(false);
+  const accountWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!accountOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!accountWrapRef.current) return;
+      if (!accountWrapRef.current.contains(e.target as Node)) {
+        setAccountOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAccountOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [accountOpen]);
+
   return (
     <header className="appnav">
       <div className="appnav-inner">
@@ -182,33 +206,80 @@ export function AppNav() {
           {(privyMode || useSupabaseBackend) && (
             <NotificationsBell userId={user.id} />
           )}
-          <Link
-            href="/app/profile"
-            className={`appnav-user ${pathname === "/app/profile" ? "active" : ""}`}
-            aria-label="Open profile"
-          >
-            <Avatar
-              src={user.avatarUrl}
-              name={displayName}
-              size={32}
-              rounded={!isCompany}
-            />
-            <div className="appnav-user-meta">
-              <span className="appnav-user-name">{displayName}</span>
-              <span className="appnav-user-role">
-                {isCompany ? "Company" : "Developer"}
-              </span>
-            </div>
-          </Link>
-          <button
-            className="appnav-logout"
-            onClick={async () => {
-              await logout();
-              router.push("/app/auth");
-            }}
-          >
-            Log out
-          </button>
+          <div className="menu-wrap appnav-user-wrap" ref={accountWrapRef}>
+            <button
+              type="button"
+              className={`appnav-user ${accountOpen || pathname === "/app/profile" ? "active" : ""}`}
+              aria-label="Account menu"
+              aria-haspopup="menu"
+              aria-expanded={accountOpen}
+              onClick={() => setAccountOpen((o) => !o)}
+            >
+              <Avatar
+                src={user.avatarUrl}
+                name={displayName}
+                size={32}
+                rounded={!isCompany}
+              />
+              <div className="appnav-user-meta">
+                <span className="appnav-user-name">{displayName}</span>
+                <span className="appnav-user-role">
+                  {isCompany ? "Company" : "Developer"}
+                </span>
+              </div>
+              <svg
+                className="appnav-user-chevron"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {accountOpen && (
+              <div className="menu-dropdown" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    router.push("/app/profile");
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                  Profile
+                </button>
+                <div className="menu-sep" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item danger"
+                  onClick={async () => {
+                    setAccountOpen(false);
+                    await logout();
+                    router.push("/app/auth");
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
