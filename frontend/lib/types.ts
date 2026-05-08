@@ -83,6 +83,17 @@ export type Bounty = {
    * untouched so it keeps mirroring on-chain reality.
    */
   closedByCap?: boolean;
+  /**
+   * Review fee paid upfront in lamports (= cap × cost_per_review × 2).
+   * `null` for legacy bounties created before the fee feature shipped.
+   */
+  reviewFeeLamportsPaid?: number | null;
+  /**
+   * Locked-in cost per review (lamports) at creation time. Used by the
+   * refund route to size the unused-slot refund without re-querying SOL/USD.
+   * `null` for legacy bounties.
+   */
+  reviewFeeLamportsPerReview?: number | null;
   createdAt: number;
 };
 

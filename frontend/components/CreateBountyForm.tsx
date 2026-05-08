@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { parseIssueUrl } from "@/lib/github";
 import { CreateBountyFlow, type CreateBountyData } from "./CreateBountyFlow";
@@ -9,6 +9,14 @@ import { WithdrawModal } from "./WithdrawModal";
 import { getConnection } from "@/lib/solana";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { usePrivyBackend } from "@/lib/auth-context";
+import { fetchSolUsdPrice } from "@/lib/pyth";
+import {
+  computeReviewFee,
+  MAX_SUBMISSIONS_DEFAULT,
+  MAX_SUBMISSIONS_MAX,
+  MAX_SUBMISSIONS_MIN,
+} from "@/lib/review-fee";
+import { REVIEW_FEE_ENABLED } from "@/lib/gas-station-client";
 import type { Company } from "@/lib/types";
 
 export function CreateBountyForm({
@@ -29,6 +37,15 @@ export function CreateBountyForm({
   const [balanceSol, setBalanceSol] = useState<number | null>(null);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [depositOpen, setDepositOpen] = useState(false);
+  // Controlled "Max PRs" input so we can render a live fee breakdown.
+  // Stored as a string so the input never coerces "" to NaN.
+  const [maxSubsInput, setMaxSubsInput] = useState<string>(
+    String(MAX_SUBMISSIONS_DEFAULT),
+  );
+  // SOL/USD locked at form mount. Re-fetched on mount only — flickering it
+  // mid-typing would change the displayed total under the user's hands.
+  // null while loading, number on success, false on hard failure.
+  const [solUsdPrice, setSolUsdPrice] = useState<number | null | false>(null);
   const formRef = useRef<HTMLFormElement | null>(null);
 
   // Wallet (Privy in real mode, fall back to mock store wallet otherwise)
@@ -61,6 +78,53 @@ export function CreateBountyForm({
       cancelled = true;
     };
   }, [walletAddress, refreshKey]);
+
+  // Pyth Hermes SOL/USD lookup. Only fired when the review-fee feature
+  // is wired on (no point hitting Pyth for legacy/local-dev builds with
+  // the env unset). Mount-only — see `solUsdPrice` doc comment.
+  useEffect(() => {
+    if (!REVIEW_FEE_ENABLED) {
+      setSolUsdPrice(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const price = await fetchSolUsdPrice();
+        if (!cancelled) setSolUsdPrice(price);
+      } catch (err) {
+        console.error("[CreateBountyForm] Pyth fetch failed:", err);
+        if (!cancelled) setSolUsdPrice(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Live fee breakdown. Recomputed on every keystroke in the cap input.
+  // Returns null when input is invalid or price hasn't loaded yet — the
+  // UI swaps in a placeholder string in that case.
+  const feeBreakdown = useMemo(() => {
+    if (!REVIEW_FEE_ENABLED) return null;
+    if (typeof solUsdPrice !== "number") return null;
+    const cap = Number(maxSubsInput);
+    if (
+      !Number.isInteger(cap) ||
+      cap < MAX_SUBMISSIONS_MIN ||
+      cap > MAX_SUBMISSIONS_MAX
+    ) {
+      return null;
+    }
+    try {
+      return computeReviewFee({
+        maxSubmissions: cap,
+        solPriceUsd: solUsdPrice,
+      });
+    } catch {
+      return null;
+    }
+  }, [solUsdPrice, maxSubsInput]);
 
   function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -105,23 +169,58 @@ export function CreateBountyForm({
       rejectThreshold = n;
     }
 
-    // GHB-184: Max PRs is optional. Null = sin cap.
-    let maxSubmissions: number | null = null;
-    if (maxSubsRaw && maxSubsRaw.length > 0) {
-      const n = Number(maxSubsRaw);
-      if (!Number.isInteger(n) || n < 1) {
-        setError("Max PRs must be a positive integer.");
-        return;
-      }
-      maxSubmissions = n;
+    // Cap is now REQUIRED (the upfront review fee is sized off it).
+    // Range: [MAX_SUBMISSIONS_MIN, MAX_SUBMISSIONS_MAX].
+    if (!maxSubsRaw || maxSubsRaw.length === 0) {
+      setError("Max PRs is required (1-50).");
+      return;
+    }
+    const maxSubmissions = Number(maxSubsRaw);
+    if (
+      !Number.isInteger(maxSubmissions) ||
+      maxSubmissions < MAX_SUBMISSIONS_MIN ||
+      maxSubmissions > MAX_SUBMISSIONS_MAX
+    ) {
+      setError(
+        `Max PRs must be an integer in [${MAX_SUBMISSIONS_MIN}, ${MAX_SUBMISSIONS_MAX}].`,
+      );
+      return;
     }
 
-    // Also block the submit if the user is trying to lock more than they
-    // have. Tx would fail in the wallet anyway, but a client-side guard
-    // saves a popup + a failed network round-trip.
-    if (balanceSol !== null && amount > balanceSol) {
+    // Hard-require the review-fee feature: if the treasury env is missing,
+    // refuse to create a bounty rather than silently skipping the fee.
+    // Local-dev workflows that genuinely don't want to charge the fee
+    // need to explicitly stub the treasury env (or run against the
+    // mock backend, which never enters this branch).
+    if (!REVIEW_FEE_ENABLED) {
       setError(
-        `Insufficient SOL — wallet has ${balanceSol.toFixed(4)}, requested ${amount}.`,
+        "Review fee not configured (NEXT_PUBLIC_TREASURY_PUBKEY missing). " +
+          "Bounty creation is disabled until the treasury wallet is wired.",
+      );
+      return;
+    }
+    // Block submit if Pyth price didn't load — sponsoring a bounty
+    // without a fee size is a net loss for us.
+    if (typeof solUsdPrice !== "number") {
+      setError(
+        "Couldn't load the live SOL price. Retry in a moment or refresh the page.",
+      );
+      return;
+    }
+
+    // Block submit if the user is trying to lock more than the balance
+    // covers — bounty + review fee. The tx would fail in the wallet
+    // anyway, but a client-side guard saves a popup + a failed network
+    // round-trip. Skip the check when the gas station tops up automatically
+    // (GAS_STATION_ENABLED + we'll fund the user from gas station).
+    const reviewFeeSol =
+      feeBreakdown !== null
+        ? feeBreakdown.totalLamports / LAMPORTS_PER_SOL
+        : 0;
+    if (balanceSol !== null && amount + reviewFeeSol > balanceSol) {
+      setError(
+        `Insufficient SOL — wallet has ${balanceSol.toFixed(4)}, ` +
+          `requested ${amount.toFixed(4)} bounty + ${reviewFeeSol.toFixed(4)} review fee.`,
       );
       return;
     }
@@ -140,6 +239,9 @@ export function CreateBountyForm({
       rejectThreshold,
       evaluationCriteria: criteria || null,
       maxSubmissions,
+      // Lock the SOL/USD rate at the moment the user committed. The
+      // flow uses this to size the bundled fee transfer in lamports.
+      solUsdPrice: typeof solUsdPrice === "number" ? solUsdPrice : null,
     });
   }
 
@@ -324,13 +426,19 @@ export function CreateBountyForm({
         </label>
 
         <label className="field">
-          <span className="field-label">Max PRs to review (optional)</span>
+          <span className="field-label">
+            Max PRs to review <span className="token-inline">required</span>
+          </span>
           <input
             name="maxSubmissions"
             type="number"
-            min={1}
+            min={MAX_SUBMISSIONS_MIN}
+            max={MAX_SUBMISSIONS_MAX}
             step={1}
-            placeholder="No limit (optional)"
+            required
+            value={maxSubsInput}
+            placeholder={String(MAX_SUBMISSIONS_DEFAULT)}
+            onChange={(e) => setMaxSubsInput(e.currentTarget.value)}
             onKeyDown={(e) => {
               if (
                 e.key.length > 1 ||
@@ -346,11 +454,50 @@ export function CreateBountyForm({
               const pasted = e.clipboardData.getData("text").trim();
               if (!/^\d+$/.test(pasted)) {
                 e.preventDefault();
-                setError("Max PRs only accepts positive integers.");
+                setError(
+                  `Max PRs accepts integers only (${MAX_SUBMISSIONS_MIN}-${MAX_SUBMISSIONS_MAX}).`,
+                );
               }
             }}
           />
+          <span className="field-hint">
+            The bounty closes automatically when this number is reached.
+            Unused slots are refunded if you cancel before the cap fills.
+          </span>
         </label>
+
+        {/* Live review-fee total. Single line, just the SOL amount —
+            internal cost / markup math stays out of the user's view. */}
+        {REVIEW_FEE_ENABLED && (
+          <div className="field fee-breakdown">
+            <span className="field-label">Review fee</span>
+            {solUsdPrice === null && (
+              <span className="field-hint">Loading live SOL price…</span>
+            )}
+            {solUsdPrice === false && (
+              <span className="field-hint">
+                Couldn't load SOL/USD from Pyth. Refresh to retry.
+              </span>
+            )}
+            {feeBreakdown && typeof solUsdPrice === "number" && (
+              <div className="fee-row total">
+                <span>
+                  {(feeBreakdown.totalLamports / LAMPORTS_PER_SOL).toFixed(4)}{" "}
+                  SOL{" "}
+                  <span className="fee-usd">
+                    (~${feeBreakdown.totalUsd.toFixed(2)})
+                  </span>
+                </span>
+              </div>
+            )}
+            {!feeBreakdown && typeof solUsdPrice === "number" && (
+              <span className="field-hint">
+                Enter a valid Max PRs ({MAX_SUBMISSIONS_MIN}-
+                {MAX_SUBMISSIONS_MAX}) to see the fee.
+              </span>
+            )}
+          </div>
+        )}
 
         <label className="field">
           <span className="field-label">Evaluation criteria (optional)</span>

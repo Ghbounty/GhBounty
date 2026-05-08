@@ -60,6 +60,7 @@ export { GasStationError } from "./types";
 export {
   SolanaGasStation,
   loadGasStationKeypair,
+  loadTreasuryKeypair,
   makeConnectionRpcSubmitter,
 } from "./solana";
 export type {
@@ -75,6 +76,8 @@ export {
   ESCROW_PROGRAM_ID,
   ALLOWED_DISCRIMINATORS_HEX,
   MAX_FEE_LAMPORTS,
+  MAX_TOPUP_LAMPORTS,
+  MAX_REVIEW_FEE_LAMPORTS,
 } from "./solana-validator";
 export type {
   ValidateOptions,

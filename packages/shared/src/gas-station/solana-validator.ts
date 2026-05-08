@@ -75,6 +75,20 @@ export const MAX_FEE_LAMPORTS = 50_000;
  */
 export const MAX_TOPUP_LAMPORTS = 50_000_000;
 
+/**
+ * Per-tx cap on the optional review-fee transfer (user → treasury)
+ * bundled with `create_bounty`. 200_000_000 lamports = 0.2 SOL.
+ *
+ * Sizing: max cap 50 PRs × $0.10/review × 2 markup = $10. At a SOL
+ * price floor of ~$50 (very pessimistic) that's 0.2 SOL. We bound it
+ * here so a malformed/abusive tx can't pretend the user authorised
+ * an arbitrarily large transfer to an attacker-controlled "treasury"
+ * — the validator still pins the destination to `expectedTreasury`,
+ * but a generous cap keeps the blast radius small even if config
+ * is misconfigured.
+ */
+export const MAX_REVIEW_FEE_LAMPORTS = 200_000_000;
+
 /** Base signature fee on Solana (mainnet + devnet, unchanged for years). */
 const BASE_FEE_LAMPORTS_PER_SIGNATURE = 5_000;
 
@@ -104,7 +118,9 @@ export type ValidatorRejectionCode =
   | "disallowed_discriminator"
   | "fee_exceeds_cap"
   | "topup_transfer_invalid"
-  | "multiple_topup_transfers";
+  | "multiple_topup_transfers"
+  | "review_fee_transfer_invalid"
+  | "multiple_review_fee_transfers";
 
 export type ValidatorResult =
   | {
@@ -119,18 +135,36 @@ export type ValidatorResult =
        * was present. The route sums this with the fee for budget logging.
        */
       topupLamports: number;
+      /**
+       * Lamports moved from the user to the treasury via the optional
+       * bundled review-fee `SystemProgram.transfer` (paid alongside
+       * `create_bounty`). 0 when no review-fee ix was present. Useful for
+       * audit logging and double-checking the persisted DB amount matches
+       * what actually moved on chain.
+       */
+      reviewFeeLamports: number;
     }
   | { ok: false; code: ValidatorRejectionCode; reason: string };
 
 export interface ValidateOptions {
   /** Public key of the gas-station signer. Must match `staticAccountKeys[0]`. */
   expectedFeePayer: PublicKey;
+  /**
+   * Treasury wallet that receives the review fee. When absent, any
+   * non-topup `SystemProgram.transfer` is rejected — i.e. the gas
+   * station can still sponsor txs without the fee feature wired up.
+   */
+  expectedTreasury?: PublicKey;
   /** Optional override for tests. Defaults to `MAX_FEE_LAMPORTS`. */
   maxFeeLamports?: number;
   /**
    * Optional override for tests. Defaults to `MAX_TOPUP_LAMPORTS`.
    */
   maxTopupLamports?: number;
+  /**
+   * Optional override for tests. Defaults to `MAX_REVIEW_FEE_LAMPORTS`.
+   */
+  maxReviewFeeLamports?: number;
   /**
    * Optional override of the allowed program. Defaults to the project
    * escrow. Tests pass a fake to exercise the wrong-program path.
@@ -152,8 +186,10 @@ export function validateSolanaSponsorTx(
 ): ValidatorResult {
   const max = opts.maxFeeLamports ?? MAX_FEE_LAMPORTS;
   const maxTopup = opts.maxTopupLamports ?? MAX_TOPUP_LAMPORTS;
+  const maxReviewFee = opts.maxReviewFeeLamports ?? MAX_REVIEW_FEE_LAMPORTS;
   const programId = opts.expectedProgramId ?? ESCROW_PROGRAM_ID;
   const allowed = opts.allowedDiscriminators ?? ALLOWED_DISCRIMINATORS_HEX;
+  const treasury = opts.expectedTreasury ?? null;
 
   let tx: VersionedTransaction;
   try {
@@ -197,8 +233,10 @@ export function validateSolanaSponsorTx(
 
   // Rule 2: separate instructions into:
   //   - compute-budget (allowed, parsed for fee estimation)
-  //   - SystemProgram.transfer (allowed at most ONCE, must be a
-  //     gas-station→user rent topup, GHB-180)
+  //   - SystemProgram.transfer — at most ONE topup (gas_station → user,
+  //     GHB-180) AND at most ONE review-fee transfer (user → treasury,
+  //     GHB-XXX). Both can co-exist on a single tx (create_bounty bundles
+  //     them together when the fee feature is wired up).
   //   - escrow (validated, exactly ONE)
   //   - anything else = reject
   let escrowIxIdx = -1;
@@ -206,6 +244,8 @@ export function validateSolanaSponsorTx(
   let computeUnitPriceMicroLamports: number | null = null;
   let topupLamports = 0;
   let sawTopup = false;
+  let reviewFeeLamports = 0;
+  let sawReviewFee = false;
 
   // numRequiredSignatures gives us the count of signer slots in
   // `staticAccountKeys`. The fee payer is at index 0; user signers
@@ -239,35 +279,68 @@ export function validateSolanaSponsorTx(
       // Only Transfer is allowed; CreateAccount / Assign / etc. are
       // rejected because they can move ownership of the gas-station
       // signer or assign new accounts to arbitrary programs.
-      const parsedTopup = parseTopupTransferIx(
+      const parsed = classifySystemTransferIx(
         ix.data,
         ix.accountKeyIndexes,
         accountKeys,
         numSigners,
+        treasury,
       );
-      if (!parsedTopup.ok) {
+      if (!parsed.ok) {
+        // Choose error code defensively: if a treasury is configured AND
+        // the transfer's source isn't the fee payer, the user almost
+        // certainly intended a review-fee transfer (and got the dest
+        // wrong). Otherwise it's a malformed topup. The reason string
+        // carries the precise diagnostic either way.
+        const looksLikeReviewFee =
+          treasury !== null && parsed.fromIdx !== 0;
+        const code: ValidatorRejectionCode = looksLikeReviewFee
+          ? "review_fee_transfer_invalid"
+          : "topup_transfer_invalid";
         return {
           ok: false,
-          code: "topup_transfer_invalid",
-          reason: `instruction ${i}: ${parsedTopup.reason}`,
+          code,
+          reason: `instruction ${i}: ${parsed.reason}`,
         };
       }
-      if (sawTopup) {
+
+      if (parsed.kind === "topup") {
+        if (sawTopup) {
+          return {
+            ok: false,
+            code: "multiple_topup_transfers",
+            reason: `instruction ${i}: a second topup SystemProgram.transfer is not allowed`,
+          };
+        }
+        if (parsed.lamports > maxTopup) {
+          return {
+            ok: false,
+            code: "topup_transfer_invalid",
+            reason: `topup transfer ${parsed.lamports} lamports exceeds cap ${maxTopup}`,
+          };
+        }
+        sawTopup = true;
+        topupLamports = parsed.lamports;
+        continue;
+      }
+
+      // parsed.kind === "review_fee"
+      if (sawReviewFee) {
         return {
           ok: false,
-          code: "multiple_topup_transfers",
-          reason: `instruction ${i}: a second SystemProgram.transfer is not allowed`,
+          code: "multiple_review_fee_transfers",
+          reason: `instruction ${i}: a second review-fee SystemProgram.transfer is not allowed`,
         };
       }
-      if (parsedTopup.lamports > maxTopup) {
+      if (parsed.lamports > maxReviewFee) {
         return {
           ok: false,
-          code: "topup_transfer_invalid",
-          reason: `topup transfer ${parsedTopup.lamports} lamports exceeds cap ${maxTopup}`,
+          code: "review_fee_transfer_invalid",
+          reason: `review-fee transfer ${parsed.lamports} lamports exceeds cap ${maxReviewFee}`,
         };
       }
-      sawTopup = true;
-      topupLamports = parsedTopup.lamports;
+      sawReviewFee = true;
+      reviewFeeLamports = parsed.lamports;
       continue;
     }
 
@@ -342,34 +415,45 @@ export function validateSolanaSponsorTx(
     discriminatorHex,
     estimatedFeeLamports,
     topupLamports,
+    reviewFeeLamports,
   };
 }
 
 /**
- * Parse a SystemProgram instruction and validate it's a Transfer of
- * the form `gas_station → user` within the allowed shape.
+ * Classify a SystemProgram instruction as one of the two transfer
+ * shapes we sponsor, or reject everything else.
  *
- * Layout of a Transfer ix:
+ * Layout of a Transfer ix (the only Solana system ix we allow):
  *   data:    [u32 LE disc=2, u64 LE lamports]   → 12 bytes
  *   accounts: [from (signer, writable), to (writable)]
  *
- * We accept ONLY this shape — no CreateAccount, no Assign, etc.
- * Source must be the fee payer (= gas station, the validator's
- * caller is responsible for that equality check at rule 1). Dest
- * must be a signer slot OTHER than the fee payer (the user's wallet
- * — `creator` for create_bounty, `solver` for submit_solution).
+ * Accepted shapes:
+ *   - **topup** (GHB-180): gas_station → user signer.
+ *     Source = fee payer (idx 0). Dest = any other signer slot.
+ *   - **review_fee**: user signer → treasury wallet.
+ *     Source = a non-fee-payer signer. Dest = `expectedTreasury`
+ *     (must be present in `accountKeys` AND outside the signer range).
+ *
+ * Anything else — CreateAccount, Assign, transfers to arbitrary
+ * destinations, transfers from non-signers — is rejected. The shape
+ * union surfaces `fromIdx` even on failure so the caller can pick a
+ * more specific error code (review_fee_transfer_invalid vs
+ * topup_transfer_invalid) for the user-facing 422.
  */
-function parseTopupTransferIx(
+function classifySystemTransferIx(
   data: Uint8Array,
   accountKeyIndexes: readonly number[] | Uint8Array,
   accountKeys: readonly PublicKey[],
   numSigners: number,
+  expectedTreasury: PublicKey | null,
 ):
-  | { ok: true; lamports: number }
-  | { ok: false; reason: string } {
+  | { ok: true; kind: "topup"; lamports: number; fromIdx: number }
+  | { ok: true; kind: "review_fee"; lamports: number; fromIdx: number }
+  | { ok: false; reason: string; fromIdx: number } {
   if (data.length !== SYSTEM_TRANSFER_DATA_LEN) {
     return {
       ok: false,
+      fromIdx: -1,
       reason: `system ix data is ${data.length} bytes, expected ${SYSTEM_TRANSFER_DATA_LEN} for Transfer`,
     };
   }
@@ -378,45 +462,87 @@ function parseTopupTransferIx(
   if (disc !== SYSTEM_TRANSFER_DISC) {
     return {
       ok: false,
+      fromIdx: -1,
       reason: `system ix discriminator ${disc} is not Transfer (${SYSTEM_TRANSFER_DISC}); CreateAccount/Assign/etc. are not sponsored`,
     };
   }
   if (accountKeyIndexes.length !== 2) {
     return {
       ok: false,
+      fromIdx: -1,
       reason: `system Transfer expects 2 accounts (from, to), got ${accountKeyIndexes.length}`,
     };
   }
   const fromIdx = accountKeyIndexes[0]!;
   const toIdx = accountKeyIndexes[1]!;
-  if (fromIdx !== 0) {
-    return {
-      ok: false,
-      reason: `topup transfer source must be the fee payer (account index 0), got index ${fromIdx}`,
-    };
-  }
-  if (toIdx === 0 || toIdx >= numSigners) {
-    // toIdx must point to a signer slot other than 0. accountKeys is
-    // [feePayer, ...otherSigners, ...nonSigners] so a valid topup dest
-    // sits in [1, numSigners). A non-signer destination would let a
-    // crafted tx exfiltrate gas-station SOL to any pubkey.
-    return {
-      ok: false,
-      reason: `topup transfer destination must be a non-fee-payer signer (index in [1, ${numSigners})), got index ${toIdx}`,
-    };
-  }
-  // Sanity: both indices must be in bounds.
+  // Sanity: both indices must be in bounds before we deref accountKeys.
   if (fromIdx >= accountKeys.length || toIdx >= accountKeys.length) {
     return {
       ok: false,
-      reason: `topup transfer references account index out of bounds`,
+      fromIdx,
+      reason: `transfer references account index out of bounds`,
     };
   }
+
   const lo = view.getUint32(4, true);
   const hi = view.getUint32(8, true);
   // u64 LE → JS Number. Lamports caps live well within 2^53.
   const lamports = lo + hi * 0x1_0000_0000;
-  return { ok: true, lamports };
+
+  // Topup: from = fee payer (idx 0), to = a non-fee-payer signer
+  // (idx in [1, numSigners)). A non-signer destination would let a
+  // crafted tx exfiltrate gas-station SOL to any pubkey.
+  if (fromIdx === 0) {
+    if (toIdx === 0 || toIdx >= numSigners) {
+      return {
+        ok: false,
+        fromIdx,
+        reason: `topup transfer destination must be a non-fee-payer signer (index in [1, ${numSigners})), got index ${toIdx}`,
+      };
+    }
+    return { ok: true, kind: "topup", lamports, fromIdx };
+  }
+
+  // Source isn't the fee payer. When the review-fee feature is OFF
+  // (no treasury configured) this matches the legacy validator's
+  // topup-source rejection — keeps backwards-compat with deployments
+  // that haven't enabled the new feature.
+  if (!expectedTreasury) {
+    return {
+      ok: false,
+      fromIdx,
+      reason: `topup transfer source must be the fee payer (account index 0), got index ${fromIdx}`,
+    };
+  }
+
+  // Review fee: from = a non-fee-payer signer (the user wallet),
+  // to = the configured treasury pubkey. Treasury must NOT be a signer
+  // slot — we never want to sponsor a treasury signature, only accept
+  // a transfer to the well-known pubkey.
+  if (fromIdx >= 1 && fromIdx < numSigners) {
+    const dest = accountKeys[toIdx]!;
+    if (toIdx < numSigners) {
+      return {
+        ok: false,
+        fromIdx,
+        reason: `review-fee destination ${dest.toBase58()} sits in the signer range; treasury must be a non-signer account`,
+      };
+    }
+    if (!dest.equals(expectedTreasury)) {
+      return {
+        ok: false,
+        fromIdx,
+        reason: `review-fee destination ${dest.toBase58()} does not match configured treasury ${expectedTreasury.toBase58()}`,
+      };
+    }
+    return { ok: true, kind: "review_fee", lamports, fromIdx };
+  }
+
+  return {
+    ok: false,
+    fromIdx,
+    reason: `unrecognised transfer source index ${fromIdx}; expected fee payer (topup) or a non-fee-payer signer (review fee)`,
+  };
 }
 
 /**

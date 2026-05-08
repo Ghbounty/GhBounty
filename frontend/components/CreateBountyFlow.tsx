@@ -45,8 +45,10 @@ import { useAuth, usePrivyBackend } from "@/lib/auth-context";
 import {
   formatGasStationError,
   GAS_STATION_ENABLED,
+  REVIEW_FEE_ENABLED,
   submitSponsored,
 } from "@/lib/gas-station-client";
+import { computeReviewFee } from "@/lib/review-fee";
 import type { Bounty, Company, ReleaseMode } from "@/lib/types";
 
 export type CreateBountyData = {
@@ -63,8 +65,19 @@ export type CreateBountyData = {
   /**
    * GHB-184: cap opcional. null = sin cap. Persisted to
    * `bounty_meta.max_submissions`.
+   *
+   * NOTE: with the review-fee feature enabled this is REQUIRED in the form;
+   * the type stays nullable so legacy callers (mock paths) still compile.
    */
   maxSubmissions?: number | null;
+  /**
+   * SOL/USD rate locked by the form at mount time (Pyth Hermes). Used by
+   * the flow to size the bundled review-fee transfer in lamports. Null
+   * means the review-fee feature is off (no transfer is added) — sets us
+   * up cleanly for the legacy/local-dev path with `NEXT_PUBLIC_TREASURY_PUBKEY`
+   * unset.
+   */
+  solUsdPrice?: number | null;
 };
 
 type Step = "confirm" | "processing" | "success" | "error";
@@ -182,6 +195,36 @@ export function CreateBountyFlow({
         connection,
       );
 
+      // Size the upfront review fee. Hard-required: bounty creation
+      // refuses to proceed without the treasury feature wired up + a
+      // valid cap + a locked SOL/USD price. The form gates these at
+      // submit time too — this is defence in depth so a misconfigured
+      // call site can't slip through to a fee-less tx.
+      if (!REVIEW_FEE_ENABLED) {
+        throw new Error(
+          "Review fee feature is not configured (NEXT_PUBLIC_TREASURY_PUBKEY missing).",
+        );
+      }
+      if (
+        typeof data.maxSubmissions !== "number" ||
+        data.maxSubmissions <= 0
+      ) {
+        throw new Error(
+          "Bounty cap (maxSubmissions) is required for fee sizing.",
+        );
+      }
+      if (typeof data.solUsdPrice !== "number") {
+        throw new Error(
+          "SOL/USD price didn't lock at form-confirm time; cannot size review fee.",
+        );
+      }
+      const breakdown = computeReviewFee({
+        maxSubmissions: data.maxSubmissions,
+        solPriceUsd: data.solUsdPrice,
+      });
+      const reviewFeePerReviewLamports = breakdown.perReviewLamports;
+      const reviewFeeTotalLamports = breakdown.totalLamports;
+
       // PHASE_SIGN: pops Privy's wallet UI. The longest step in practice
       // (waiting on the user). GHB-176 introduces two paths here:
       //   1. Gas-station (sponsored): the user partial-signs only their
@@ -192,6 +235,12 @@ export function CreateBountyFlow({
       setPhase(PHASE_SIGN);
       let sig: string;
       if (GAS_STATION_ENABLED) {
+        // Topup must cover both the rent buffer (~3.47M) AND the review
+        // fee transfer that fires immediately after — otherwise the
+        // user's freshly-funded wallet has enough for rent but not the
+        // fee, and the second System.transfer fails preflight.
+        const topupLamports = 5_000_000 + reviewFeeTotalLamports;
+
         const result = await submitSponsored({
           ix,
           wallet,
@@ -201,9 +250,13 @@ export function CreateBountyFlow({
           // GHB-180 — bundle a rent topup so a 0-SOL Privy wallet can
           // pay the Bounty PDA's `init` rent. The smoke confirmed
           // ~3.47M lamports rent on devnet; we over-fund to ~5M for a
-          // safety margin (well below the validator's 0.05 SOL cap).
-          // Leftover dust stays in the user's wallet — fine.
-          topupLamports: 5_000_000,
+          // safety margin. Adds the review-fee total so the user has
+          // enough balance to also pay the treasury.
+          topupLamports,
+          // Bundle the review-fee transfer (user → treasury). The
+          // validator pins the destination to TREASURY_PUBKEY
+          // server-side.
+          reviewFeeLamports: reviewFeeTotalLamports,
         });
         sig = result.txHash;
         setTxSig(sig);
@@ -218,7 +271,26 @@ export function CreateBountyFlow({
         const tx = new Transaction({
           feePayer: creator,
           recentBlockhash: blockhash,
-        }).add(ix);
+        });
+        // Legacy/local-dev path (no gas station): user pays the fee
+        // directly out of their own wallet AND signs the create_bounty
+        // ix. Atomic — same tx for both. The hard-required check at
+        // the top guarantees `reviewFeeTotalLamports > 0` here.
+        const { SystemProgram } = await import("@solana/web3.js");
+        const { TREASURY_PUBKEY } = await import("@/lib/gas-station-client");
+        if (!TREASURY_PUBKEY) {
+          throw new Error(
+            "TREASURY_PUBKEY missing in legacy/non-sponsored path",
+          );
+        }
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: creator,
+            toPubkey: TREASURY_PUBKEY,
+            lamports: reviewFeeTotalLamports,
+          }),
+        );
+        tx.add(ix);
         const serialized = tx.serialize({ requireAllSignatures: false });
         const { signature } = await signAndSendTransaction({
           transaction: serialized,
@@ -263,6 +335,11 @@ export function CreateBountyFlow({
         rejectThreshold: data.rejectThreshold ?? null,
         evaluationCriteria: data.evaluationCriteria ?? null,
         maxSubmissions: data.maxSubmissions ?? null,
+        // Lock both the total + per-review lamports so the cancel-refund
+        // route can compute (cap - used) × per_review without re-querying
+        // SOL/USD. Null when the feature is disabled (local dev).
+        reviewFeeLamportsPaid: reviewFeeTotalLamports,
+        reviewFeeLamportsPerReview: reviewFeePerReviewLamports,
         createdByUserId: user.id,
       });
 
@@ -339,46 +416,78 @@ export function CreateBountyFlow({
           </button>
         )}
 
-        {step === "confirm" && (
+        {step === "confirm" && (() => {
+          // Pre-compute the review-fee preview. Mirrors the math in
+          // `runRealFlow`; safe to fail open (null) because the form
+          // already validated cap + price at submit time.
+          let reviewFeeSol: number | null = null;
+          let reviewFeeUsd: number | null = null;
+          if (
+            REVIEW_FEE_ENABLED &&
+            typeof data.maxSubmissions === "number" &&
+            data.maxSubmissions > 0 &&
+            typeof data.solUsdPrice === "number"
+          ) {
+            try {
+              const b = computeReviewFee({
+                maxSubmissions: data.maxSubmissions,
+                solPriceUsd: data.solUsdPrice,
+              });
+              reviewFeeSol = b.totalLamports / LAMPORTS_PER_SOL;
+              reviewFeeUsd = b.totalUsd;
+            } catch {
+              /* shouldn't happen — form validates these */
+            }
+          }
+          const totalSol = data.amount + (reviewFeeSol ?? 0);
+          const cap = data.maxSubmissions ?? 0;
+
+          return (
           <>
             <div className="modal-head">
-              <div className="eyebrow">Review bounty</div>
-              <h2 className="modal-title">Confirm &amp; fund escrow</h2>
+              <div className="eyebrow">Are you sure?</div>
+              <h2 className="modal-title fee-headline">
+                {cap} PRs will cost{" "}
+                {reviewFeeUsd != null ? (
+                  <span className="fee-amount">~${reviewFeeUsd.toFixed(2)}</span>
+                ) : null}
+              </h2>
+              {reviewFeeSol != null && (
+                <div className="fee-subhead">
+                  {reviewFeeSol.toFixed(4)} SOL deducted now for AI reviews
+                </div>
+              )}
             </div>
 
             <div className="modal-summary">
               <SummaryRow label="Issue" value={`${data.repo} #${data.issueNumber}`} mono />
-              {data.title && <SummaryRow label="Title" value={data.title} />}
               <SummaryRow
-                label="Bounty"
+                label="Bounty escrow"
                 value={`${data.amount.toLocaleString()} SOL`}
-                highlight
               />
-              <SummaryRow
-                label="Release mode"
-                value={
-                  data.releaseMode === "auto"
-                    ? "Auto-release on AI approval"
-                    : "AI-assisted — you pick winner"
-                }
-              />
-              {data.rejectThreshold != null && (
+              {reviewFeeSol != null && (
                 <SummaryRow
-                  label="Reject threshold"
-                  value={`Score < ${data.rejectThreshold} auto-rejected`}
+                  label="Review fee"
+                  value={`${reviewFeeSol.toFixed(4)} SOL`}
                 />
               )}
-              <SummaryRow label="Network" value="Solana devnet" mono />
+              {reviewFeeSol != null && (
+                <SummaryRow
+                  label="Total deducted"
+                  value={`${totalSol.toFixed(4)} SOL`}
+                  highlight
+                />
+              )}
               <SummaryRow
-                label="Treasury wallet"
+                label="From wallet"
                 value={walletAddress ? shortHex(walletAddress) : "not connected"}
                 mono
               />
             </div>
 
             <p className="modal-note">
-              Funds are locked on-chain in the bounty PDA. They release
-              automatically when the AI validators approve a submission.
+              One signature, one atomic transaction. Unused review slots
+              are refunded if you cancel before the cap fills.
             </p>
 
             <div className="modal-foot">
@@ -391,11 +500,12 @@ export function CreateBountyFlow({
                 disabled={!walletAddress || !walletsReady}
                 title={!walletAddress ? "Connect a wallet first" : undefined}
               >
-                Confirm &amp; fund
+                Confirm &amp; pay
               </button>
             </div>
           </>
-        )}
+          );
+        })()}
 
         {step === "processing" && (
           <>

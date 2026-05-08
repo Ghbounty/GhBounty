@@ -58,6 +58,20 @@ export const GAS_STATION_PUBKEY: PublicKey | null = PUBKEY_ENV
 
 export const GAS_STATION_ENABLED = GAS_STATION_PUBKEY !== null;
 
+const TREASURY_PUBKEY_ENV = process.env.NEXT_PUBLIC_TREASURY_PUBKEY?.trim();
+
+/**
+ * The review-fee treasury pubkey. Null when the review-fee feature is
+ * disabled (env unset). Components compute a SystemProgram.transfer
+ * to this address when creating a bounty; the server validates that
+ * the destination matches its own configured treasury.
+ */
+export const TREASURY_PUBKEY: PublicKey | null = TREASURY_PUBKEY_ENV
+  ? new PublicKey(TREASURY_PUBKEY_ENV)
+  : null;
+
+export const REVIEW_FEE_ENABLED = TREASURY_PUBKEY !== null;
+
 type SponsoredChainId = "solana-devnet" | "solana-mainnet";
 
 const CHAIN_ID_ENV = process.env.NEXT_PUBLIC_GAS_STATION_CHAIN_ID?.trim();
@@ -124,10 +138,28 @@ export interface SubmitSponsoredArgs {
    */
   topupLamports?: number;
   /**
+   * Bundle a `SystemProgram.transfer(user → treasury, n)` immediately
+   * after the topup so the user pays the upfront review fee in the
+   * same atomic tx as `create_bounty`. Only valid alongside
+   * `create_bounty`; the validator rejects review-fee transfers next
+   * to other escrow ixs by virtue of "exactly one escrow ix" + the
+   * review-fee discriminator never being a sibling shape.
+   *
+   * Requires `TREASURY_PUBKEY` to be configured (or `treasuryPubkey`
+   * passed explicitly). The amount must be ≤ MAX_REVIEW_FEE_LAMPORTS
+   * server-side.
+   */
+  reviewFeeLamports?: number;
+  /**
    * Override the gas-station pubkey (tests). Defaults to the module
    * env-derived constant.
    */
   gasStationPubkey?: PublicKey;
+  /**
+   * Override the treasury pubkey (tests). Defaults to the module
+   * env-derived constant. Required only when `reviewFeeLamports > 0`.
+   */
+  treasuryPubkey?: PublicKey;
   /** Override the chain id (tests). Defaults to env-derived constant. */
   chainId?: SponsoredChainId;
   /** Override `fetch` (tests). Defaults to globalThis.fetch. */
@@ -161,15 +193,14 @@ export async function submitSponsored(
   //    funds the user's wallet so it can pay rent for an init'd PDA.
   const { blockhash } = await args.connection.getLatestBlockhash("confirmed");
   const instructions: TransactionInstruction[] = [];
-  if (args.topupLamports !== undefined && args.topupLamports > 0) {
-    if (!Number.isFinite(args.topupLamports) || !Number.isInteger(args.topupLamports)) {
-      throw new GasStationClientError(
-        500,
-        null,
-        `topupLamports must be a non-negative integer, got: ${args.topupLamports}`,
-      );
-    }
-    let userPubkey: PublicKey;
+
+  // Resolve the user pubkey once — both topup and review-fee transfers
+  // need it (topup as dest, review fee as source).
+  let userPubkey: PublicKey | null = null;
+  const needsUserPubkey =
+    (args.topupLamports !== undefined && args.topupLamports > 0) ||
+    (args.reviewFeeLamports !== undefined && args.reviewFeeLamports > 0);
+  if (needsUserPubkey) {
     try {
       userPubkey = new PublicKey(args.wallet.address);
     } catch (err) {
@@ -179,14 +210,56 @@ export async function submitSponsored(
         `wallet.address is not a valid pubkey: ${(err as Error).message}`,
       );
     }
+  }
+
+  if (args.topupLamports !== undefined && args.topupLamports > 0) {
+    if (!Number.isFinite(args.topupLamports) || !Number.isInteger(args.topupLamports)) {
+      throw new GasStationClientError(
+        500,
+        null,
+        `topupLamports must be a non-negative integer, got: ${args.topupLamports}`,
+      );
+    }
     instructions.push(
       SystemProgram.transfer({
         fromPubkey: gasStationPubkey,
-        toPubkey: userPubkey,
+        toPubkey: userPubkey!,
         lamports: args.topupLamports,
       }),
     );
   }
+
+  // Review fee: user → treasury. Goes AFTER topup (so the user has
+  // funded balance before the transfer fires) and BEFORE the escrow ix
+  // (so create_bounty's atomicity covers both).
+  if (args.reviewFeeLamports !== undefined && args.reviewFeeLamports > 0) {
+    if (
+      !Number.isFinite(args.reviewFeeLamports) ||
+      !Number.isInteger(args.reviewFeeLamports)
+    ) {
+      throw new GasStationClientError(
+        500,
+        null,
+        `reviewFeeLamports must be a non-negative integer, got: ${args.reviewFeeLamports}`,
+      );
+    }
+    const treasury = args.treasuryPubkey ?? TREASURY_PUBKEY;
+    if (!treasury) {
+      throw new GasStationClientError(
+        500,
+        null,
+        "review fee not configured: NEXT_PUBLIC_TREASURY_PUBKEY missing",
+      );
+    }
+    instructions.push(
+      SystemProgram.transfer({
+        fromPubkey: userPubkey!,
+        toPubkey: treasury,
+        lamports: args.reviewFeeLamports,
+      }),
+    );
+  }
+
   instructions.push(args.ix);
 
   const message = new TransactionMessage({

@@ -213,13 +213,16 @@ type IssueRow = {
     reject_threshold: number | null;
     max_submissions: number | null;
     closed_by_cap_at: string | null;
+    // BIGINT — comes over the wire as string. null on legacy bounties.
+    review_fee_lamports_paid: string | null;
+    review_fee_lamports_per_review: string | null;
   } | null;
 };
 
 // `cap_warning_sent_at` lives only in `bounty_meta` for relayer-side gating
 // — the frontend never reads it, so we keep it out of the public select.
 const ISSUE_SELECT =
-  "id, pda, github_issue_url, amount, state, submission_count, review_eligible_count, created_at, bounty_meta(title, description, release_mode, closed_by_user, created_by_user_id, reject_threshold, max_submissions, closed_by_cap_at)";
+  "id, pda, github_issue_url, amount, state, submission_count, review_eligible_count, created_at, bounty_meta(title, description, release_mode, closed_by_user, created_by_user_id, reject_threshold, max_submissions, closed_by_cap_at, review_fee_lamports_paid, review_fee_lamports_per_review)";
 
 /** Parse "https://github.com/<owner>/<repo>/issues/<n>" → repo + number. */
 function parseGithubIssueUrl(url: string): { repo: string; issueNumber: number } {
@@ -302,6 +305,16 @@ function rowToBounty(
     maxSubmissions: meta?.max_submissions ?? null,
     reviewEligibleCount: row.review_eligible_count ?? 0,
     closedByCap,
+    // BIGINT serialised as string by Supabase — Number() cast is safe for
+    // lamport values well within 2^53.
+    reviewFeeLamportsPaid:
+      meta?.review_fee_lamports_paid != null
+        ? Number(meta.review_fee_lamports_paid)
+        : null,
+    reviewFeeLamportsPerReview:
+      meta?.review_fee_lamports_per_review != null
+        ? Number(meta.review_fee_lamports_per_review)
+        : null,
     createdAt: new Date(row.created_at).getTime(),
   };
 }

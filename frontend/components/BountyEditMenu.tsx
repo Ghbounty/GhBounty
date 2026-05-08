@@ -236,7 +236,57 @@ export function BountyEditMenu({
         }
       }
 
-      // 2) Off-chain cleanup. RLS lets the creator delete their own meta,
+      // 2) Refund the unused review-fee budget — `(cap - used) ×
+      //    review_fee_lamports_per_review` from `bounty_meta` — by
+      //    calling our backend route. The treasury keypair lives there
+      //    (never on the client). Idempotent: a repeat call after a
+      //    crash returns the prior tx hash from `treasury_refunds`.
+      //
+      //    Order matters: refund BEFORE deleteIssueAndMeta, otherwise
+      //    the row the route reads from is gone. We swallow refund
+      //    errors when it's a "nothing to refund" / "already refunded"
+      //    case (status 200 — nothing actually broke). For genuine
+      //    failures we abort so the user can retry without orphaning
+      //    the SOL in treasury.
+      if (privyMode && bounty.pda) {
+        try {
+          const accessToken = await privy.getAccessToken();
+          if (!accessToken) {
+            throw new Error("Privy access token unavailable for refund");
+          }
+          const refundRes = await fetch("/api/cancel-refund", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ bountyPda: bounty.pda }),
+          });
+          if (!refundRes.ok) {
+            const body = (await refundRes
+              .json()
+              .catch(() => ({}))) as { error?: string; reason?: string };
+            // 404 = bounty already gone (e.g. delete crashed mid-way
+            // last attempt), treat as "nothing to refund". Anything
+            // else is a real failure.
+            if (refundRes.status !== 404) {
+              throw new Error(
+                body.reason ||
+                  body.error ||
+                  `refund route returned HTTP ${refundRes.status}`,
+              );
+            }
+          }
+        } catch (refundErr) {
+          console.error(
+            "[BountyEditMenu] refund failed:",
+            refundErr,
+          );
+          throw refundErr;
+        }
+      }
+
+      // 3) Off-chain cleanup. RLS lets the creator delete their own meta,
       //    then the orphan-issue policy lets them delete the issue row.
       setPhase("removing");
       const supabase = createClient();

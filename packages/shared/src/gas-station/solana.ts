@@ -31,6 +31,7 @@ import * as path from "node:path";
 import {
   Connection,
   Keypair,
+  PublicKey,
   VersionedTransaction,
   type Commitment,
 } from "@solana/web3.js";
@@ -89,6 +90,13 @@ export interface SolanaGasStationDeps {
   confirmTimeoutMs?: number;
   /** Override the validator's fee cap. Default = `MAX_FEE_LAMPORTS`. */
   maxFeeLamports?: number;
+  /**
+   * Treasury wallet that receives the bundled review-fee transfer when
+   * companies create a bounty. Required for the review-fee feature; the
+   * validator rejects any non-topup `SystemProgram.transfer` when this
+   * is unset (so older deployments without the feature stay safe).
+   */
+  treasuryPubkey?: PublicKey;
   /** Logger override. Default writes one JSON line to stdout. */
   log?: (entry: SponsorLogEntry) => void;
 }
@@ -99,6 +107,7 @@ export class SolanaGasStation implements GasStation {
   private readonly rpc: SolanaRpcSubmitter;
   private readonly confirmTimeoutMs: number;
   private readonly maxFeeLamports: number | undefined;
+  private readonly treasuryPubkey: PublicKey | undefined;
   private readonly log: (entry: SponsorLogEntry) => void;
 
   constructor(deps: SolanaGasStationDeps) {
@@ -115,6 +124,7 @@ export class SolanaGasStation implements GasStation {
     this.rpc = deps.rpc;
     this.confirmTimeoutMs = deps.confirmTimeoutMs ?? 60_000;
     this.maxFeeLamports = deps.maxFeeLamports;
+    this.treasuryPubkey = deps.treasuryPubkey;
     this.log = deps.log ?? defaultLog;
   }
 
@@ -142,6 +152,9 @@ export class SolanaGasStation implements GasStation {
       expectedFeePayer: this.keypair.publicKey,
       ...(this.maxFeeLamports !== undefined && {
         maxFeeLamports: this.maxFeeLamports,
+      }),
+      ...(this.treasuryPubkey !== undefined && {
+        expectedTreasury: this.treasuryPubkey,
       }),
     });
     if (!validation.ok) {
@@ -294,6 +307,45 @@ export function loadGasStationKeypair(): Keypair {
   }
   // Match the scorer loader's `~` handling — `fs.readFileSync` does
   // not expand it and a literal-tilde path silently ENOENTs.
+  const expandedPath = keypairPath.startsWith("~")
+    ? path.join(os.homedir(), keypairPath.slice(1))
+    : keypairPath;
+  const raw = JSON.parse(fs.readFileSync(expandedPath, "utf-8")) as number[];
+  return Keypair.fromSecretKey(Uint8Array.from(raw));
+}
+
+/**
+ * Load the treasury keypair from `TREASURY_KEYPAIR_JSON` or
+ * `TREASURY_KEYPAIR_PATH`. Same mechanism as `loadGasStationKeypair`,
+ * different env vars so the two keys can rotate independently.
+ *
+ * Used by the cancel-refund route to sign treasury → creator transfers
+ * for unused review slots.
+ */
+export function loadTreasuryKeypair(): Keypair {
+  const inlineJson = process.env.TREASURY_KEYPAIR_JSON?.trim();
+  if (inlineJson) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(inlineJson);
+    } catch (err) {
+      throw new Error(
+        `TREASURY_KEYPAIR_JSON is not valid JSON: ${(err as Error).message}`,
+      );
+    }
+    if (!Array.isArray(parsed) || parsed.some((n) => typeof n !== "number")) {
+      throw new Error(
+        "TREASURY_KEYPAIR_JSON must be a JSON array of numbers (64 bytes)",
+      );
+    }
+    return Keypair.fromSecretKey(Uint8Array.from(parsed as number[]));
+  }
+  const keypairPath = process.env.TREASURY_KEYPAIR_PATH?.trim();
+  if (!keypairPath) {
+    throw new Error(
+      "Missing treasury keypair: set TREASURY_KEYPAIR_JSON or TREASURY_KEYPAIR_PATH",
+    );
+  }
   const expandedPath = keypairPath.startsWith("~")
     ? path.join(os.homedir(), keypairPath.slice(1))
     : keypairPath;

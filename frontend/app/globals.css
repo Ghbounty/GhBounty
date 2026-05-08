@@ -1980,6 +1980,65 @@ section { position: relative; padding: 120px 40px; }
   margin-top: 2px;
 }
 
+/* --- review fee breakdown (CreateBountyForm) ---
+   Two-column rows for "X reviews × $0.10 × 2× markup … $4.00" — the
+   left span is the formula, the right span is the amount. The `total`
+   variant is the SOL-equivalent line and gets a stronger weight + a
+   subtle separator on top to anchor it as the "you'll pay" total. */
+.fee-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.fee-breakdown-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.fee-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 16px;
+  font-size: 14px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.fee-row.total {
+  font-weight: 600;
+  color: var(--text-bright, #fff);
+}
+.fee-usd {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 13px;
+}
+
+/* --- Confirm-fee modal headline (CreateBountyFlow's "confirm" step) ---
+   The modal-grade "X PRs will cost ~$Y" headline. Larger than the form
+   field-level total, with the dollar amount accented in the brand teal
+   so the user reads the price first. */
+.fee-headline {
+  font-size: 26px;
+  line-height: 1.25;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.fee-amount {
+  color: var(--accent, #00E5D1);
+  white-space: nowrap;
+}
+.fee-subhead {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
 /* --- narrow confirm modal --- */
 .modal.modal-narrow { max-width: 440px; }
 
