@@ -195,26 +195,35 @@ export function CreateBountyFlow({
         connection,
       );
 
-      // Size the upfront review fee. The form is the source of truth for
-      // both the cap AND the SOL/USD price (locked at user-confirm time
-      // so a price tick mid-sign doesn't change what the user agreed to).
-      // When either is missing we fall through to a fee-less tx — the
-      // legacy / local-dev path without `NEXT_PUBLIC_TREASURY_PUBKEY`.
-      let reviewFeePerReviewLamports: number | null = null;
-      let reviewFeeTotalLamports: number | null = null;
-      if (
-        REVIEW_FEE_ENABLED &&
-        typeof data.maxSubmissions === "number" &&
-        data.maxSubmissions > 0 &&
-        typeof data.solUsdPrice === "number"
-      ) {
-        const breakdown = computeReviewFee({
-          maxSubmissions: data.maxSubmissions,
-          solPriceUsd: data.solUsdPrice,
-        });
-        reviewFeePerReviewLamports = breakdown.perReviewLamports;
-        reviewFeeTotalLamports = breakdown.totalLamports;
+      // Size the upfront review fee. Hard-required: bounty creation
+      // refuses to proceed without the treasury feature wired up + a
+      // valid cap + a locked SOL/USD price. The form gates these at
+      // submit time too — this is defence in depth so a misconfigured
+      // call site can't slip through to a fee-less tx.
+      if (!REVIEW_FEE_ENABLED) {
+        throw new Error(
+          "Review fee feature is not configured (NEXT_PUBLIC_TREASURY_PUBKEY missing).",
+        );
       }
+      if (
+        typeof data.maxSubmissions !== "number" ||
+        data.maxSubmissions <= 0
+      ) {
+        throw new Error(
+          "Bounty cap (maxSubmissions) is required for fee sizing.",
+        );
+      }
+      if (typeof data.solUsdPrice !== "number") {
+        throw new Error(
+          "SOL/USD price didn't lock at form-confirm time; cannot size review fee.",
+        );
+      }
+      const breakdown = computeReviewFee({
+        maxSubmissions: data.maxSubmissions,
+        solPriceUsd: data.solUsdPrice,
+      });
+      const reviewFeePerReviewLamports = breakdown.perReviewLamports;
+      const reviewFeeTotalLamports = breakdown.totalLamports;
 
       // PHASE_SIGN: pops Privy's wallet UI. The longest step in practice
       // (waiting on the user). GHB-176 introduces two paths here:
@@ -230,8 +239,7 @@ export function CreateBountyFlow({
         // fee transfer that fires immediately after — otherwise the
         // user's freshly-funded wallet has enough for rent but not the
         // fee, and the second System.transfer fails preflight.
-        const topupLamports =
-          5_000_000 + (reviewFeeTotalLamports ?? 0);
+        const topupLamports = 5_000_000 + reviewFeeTotalLamports;
 
         const result = await submitSponsored({
           ix,
@@ -242,16 +250,13 @@ export function CreateBountyFlow({
           // GHB-180 — bundle a rent topup so a 0-SOL Privy wallet can
           // pay the Bounty PDA's `init` rent. The smoke confirmed
           // ~3.47M lamports rent on devnet; we over-fund to ~5M for a
-          // safety margin (well below the validator's 0.05 SOL cap).
-          // Leftover dust stays in the user's wallet — fine. Adds the
-          // review-fee total so the user can also pay the treasury.
+          // safety margin. Adds the review-fee total so the user has
+          // enough balance to also pay the treasury.
           topupLamports,
-          // Bundle the review-fee transfer (user → treasury) when the
-          // feature is configured. The validator pins the destination
-          // to TREASURY_PUBKEY server-side.
-          ...(reviewFeeTotalLamports !== null && {
-            reviewFeeLamports: reviewFeeTotalLamports,
-          }),
+          // Bundle the review-fee transfer (user → treasury). The
+          // validator pins the destination to TREASURY_PUBKEY
+          // server-side.
+          reviewFeeLamports: reviewFeeTotalLamports,
         });
         sig = result.txHash;
         setTxSig(sig);
@@ -267,27 +272,24 @@ export function CreateBountyFlow({
           feePayer: creator,
           recentBlockhash: blockhash,
         });
-        // Legacy/local-dev path: when REVIEW_FEE_ENABLED is on, still
-        // include the user → treasury transfer atomically with create_bounty.
-        // Without a gas station the user pays the SOL directly out of their
-        // own wallet (which they must have funded themselves).
-        if (reviewFeeTotalLamports !== null && reviewFeeTotalLamports > 0) {
-          // Lazy import to avoid pulling SystemProgram into the gas-station
-          // path's bundle by accident.
-          const { SystemProgram } = await import("@solana/web3.js");
-          const { TREASURY_PUBKEY } = await import(
-            "@/lib/gas-station-client"
+        // Legacy/local-dev path (no gas station): user pays the fee
+        // directly out of their own wallet AND signs the create_bounty
+        // ix. Atomic — same tx for both. The hard-required check at
+        // the top guarantees `reviewFeeTotalLamports > 0` here.
+        const { SystemProgram } = await import("@solana/web3.js");
+        const { TREASURY_PUBKEY } = await import("@/lib/gas-station-client");
+        if (!TREASURY_PUBKEY) {
+          throw new Error(
+            "TREASURY_PUBKEY missing in legacy/non-sponsored path",
           );
-          if (TREASURY_PUBKEY) {
-            tx.add(
-              SystemProgram.transfer({
-                fromPubkey: creator,
-                toPubkey: TREASURY_PUBKEY,
-                lamports: reviewFeeTotalLamports,
-              }),
-            );
-          }
         }
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: creator,
+            toPubkey: TREASURY_PUBKEY,
+            lamports: reviewFeeTotalLamports,
+          }),
+        );
         tx.add(ix);
         const serialized = tx.serialize({ requireAllSignatures: false });
         const { signature } = await signAndSendTransaction({

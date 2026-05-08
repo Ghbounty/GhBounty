@@ -189,9 +189,21 @@ export function CreateBountyForm({
       return;
     }
 
+    // Hard-require the review-fee feature: if the treasury env is missing,
+    // refuse to create a bounty rather than silently skipping the fee.
+    // Local-dev workflows that genuinely don't want to charge the fee
+    // need to explicitly stub the treasury env (or run against the
+    // mock backend, which never enters this branch).
+    if (!REVIEW_FEE_ENABLED) {
+      setError(
+        "Review fee not configured (NEXT_PUBLIC_TREASURY_PUBKEY missing). " +
+          "Bounty creation is disabled until the treasury wallet is wired.",
+      );
+      return;
+    }
     // Block submit if Pyth price didn't load — sponsoring a bounty
     // without a fee size is a net loss for us.
-    if (REVIEW_FEE_ENABLED && typeof solUsdPrice !== "number") {
+    if (typeof solUsdPrice !== "number") {
       setError(
         "Couldn't load the live SOL price. Retry in a moment or refresh the page.",
       );
