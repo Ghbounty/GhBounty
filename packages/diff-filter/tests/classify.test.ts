@@ -49,6 +49,12 @@ describe("classifyPath — generated dirs", () => {
     "app/.next/static/chunks/webpack.js",
     "coverage/lcov-report/index.html",
     "__pycache__/module.cpython-311.pyc",
+    // Anchor framework — `.anchor/` holds regenerated ledger state and
+    // IDL caches. Both top-level and nested (under the actual workspace
+    // path used in this repo) must be filtered.
+    ".anchor/test-ledger/genesis.bin",
+    "contracts/solana/.anchor/test-ledger/rocksdb/CURRENT",
+    "contracts/solana/.anchor/program-logs/escrow.log",
   ])("marks %s as generated_dir", (path) => {
     const r = classifyPath(path);
     expect(r.ignore).toBe(true);
