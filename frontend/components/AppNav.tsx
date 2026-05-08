@@ -109,21 +109,29 @@ export function AppNav() {
     balanceSol !== null &&
     balanceSol > 0;
 
-  // Avatar dropdown (Profile / Log out). Mirrors the click-outside +
-  // Escape pattern from BountyEditMenu so the affordance is consistent
-  // across the app.
+  // Two header dropdowns: wallet (address/balance/Deposit/Withdraw) and
+  // account (Profile/Log out). Both mirror the click-outside + Escape
+  // pattern from BountyEditMenu so the affordance is consistent.
+  const [walletOpen, setWalletOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const walletWrapRef = useRef<HTMLDivElement | null>(null);
   const accountWrapRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    if (!accountOpen) return;
+    if (!walletOpen && !accountOpen) return;
     const onDoc = (e: MouseEvent) => {
-      if (!accountWrapRef.current) return;
-      if (!accountWrapRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (walletOpen && !walletWrapRef.current?.contains(target)) {
+        setWalletOpen(false);
+      }
+      if (accountOpen && !accountWrapRef.current?.contains(target)) {
         setAccountOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAccountOpen(false);
+      if (e.key === "Escape") {
+        setWalletOpen(false);
+        setAccountOpen(false);
+      }
     };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
@@ -131,7 +139,7 @@ export function AppNav() {
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [accountOpen]);
+  }, [walletOpen, accountOpen]);
 
   return (
     <header className="appnav">
@@ -156,40 +164,99 @@ export function AppNav() {
         </nav>
         <div className="appnav-right">
           {walletAddress ? (
-            <>
+            <div className="menu-wrap" ref={walletWrapRef}>
               <button
                 type="button"
                 className="wallet-btn connected"
-                onClick={handleCopy}
-                title="Click to copy address"
+                aria-haspopup="menu"
+                aria-expanded={walletOpen}
+                onClick={() => setWalletOpen((o) => !o)}
               >
                 <span className="wallet-btn-dot" />
-                <code>{copied ? "Copied!" : shortWallet(walletAddress)}</code>
+                <code>{shortWallet(walletAddress)}</code>
                 {balanceSol !== null && (
                   <span className="wallet-btn-balance">
                     {balanceSol.toFixed(3)} SOL
                   </span>
                 )}
+                <svg
+                  className="wallet-btn-chevron"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </button>
-              <button
-                type="button"
-                className="wallet-chip wallet-chip-deposit"
-                onClick={() => setDepositOpen(true)}
-                disabled={!privyMode}
-                title="Receive SOL into your Privy wallet"
-              >
-                Deposit
-              </button>
-              <button
-                type="button"
-                className="wallet-chip wallet-chip-withdraw"
-                onClick={() => setWithdrawOpen(true)}
-                disabled={!canWithdraw}
-                title="Send SOL from your Privy wallet to an external address"
-              >
-                Withdraw
-              </button>
-            </>
+              {walletOpen && (
+                <div className="menu-dropdown wallet-menu" role="menu">
+                  <div className="wallet-menu-info">
+                    <div className="wallet-menu-row">
+                      <code className="wallet-menu-address" title={walletAddress}>
+                        {shortWallet(walletAddress)}
+                      </code>
+                      <button
+                        type="button"
+                        className="wallet-menu-copy"
+                        onClick={handleCopy}
+                        title="Copy full address"
+                      >
+                        {copied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                    <div className="wallet-menu-row">
+                      <span className="wallet-menu-label">Balance</span>
+                      <span className="wallet-menu-balance">
+                        {balanceSol !== null
+                          ? `${balanceSol.toFixed(3)} SOL`
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="menu-sep" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setWalletOpen(false);
+                      setDepositOpen(true);
+                    }}
+                    disabled={!privyMode}
+                    title="Receive SOL into your Privy wallet"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <polyline points="19 12 12 19 5 12" />
+                    </svg>
+                    Deposit
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setWalletOpen(false);
+                      setWithdrawOpen(true);
+                    }}
+                    disabled={!canWithdraw}
+                    title="Send SOL from your Privy wallet to an external address"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="19" x2="12" y2="5" />
+                      <polyline points="5 12 12 5 19 12" />
+                    </svg>
+                    Withdraw
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <button className="wallet-btn" onClick={handleConnect}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
