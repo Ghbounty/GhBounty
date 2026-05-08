@@ -606,6 +606,16 @@ function Team() {
         { kind: "linkedin", href: "https://www.linkedin.com/in/tomasmazzi/" },
       ],
     },
+    {
+      photo: "/landing/founders/gaston.png",
+      name: "Gastón Foncea",
+      role: "Full Stack Developer",
+      bio: "Builds AI agents and developer tooling.",
+      links: [
+        { kind: "linkedin", href: "https://www.linkedin.com/in/gastonfoncea/" },
+        { kind: "x", href: "https://x.com/gastonfonceadev" },
+      ],
+    },
   ];
 
   const LinkedInIcon = (p: SVGProps<SVGSVGElement>) => (
@@ -631,8 +641,8 @@ function Team() {
             <span className="accent">shipped real things.</span>
           </h2>
           <p>
-            Two operators with complementary scars — DeFi engineering on one
-            side, product and growth on the other.
+            Three operators with complementary scars — DeFi engineering, product
+            and growth, and full-stack agents tooling.
           </p>
         </div>
         <div className="team-grid">
