@@ -1,0 +1,28 @@
+:root {
+  color-scheme: dark;
+}
+body {
+  margin: 0;
+  font-family: -apple-system, system-ui, sans-serif;
+  background: #0a0a0a;
+  color: #e5e5e5;
+  min-height: 100vh;
+}
+.container {
+  max-width: 720px;
+  margin: 80px auto;
+  padding: 0 24px;
+}
+code {
+  background: #1a1a1a;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+}
+pre {
+  background: #1a1a1a;
+  padding: 16px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+a { color: #00e5d1; }
