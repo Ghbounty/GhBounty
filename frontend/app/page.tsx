@@ -604,6 +604,7 @@ function Team() {
       bio: "DeFi engineer since 2022. Shipped for Near, Solv, Linera and Midas. ~80% hackathon win rate.",
       links: [
         { kind: "linkedin", href: "https://www.linkedin.com/in/tomasmazzi/" },
+        { kind: "x", href: "https://x.com/tomasmazz" },
       ],
     },
     {
