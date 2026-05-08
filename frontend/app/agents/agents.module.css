@@ -1,0 +1,450 @@
+/* === /agents docs page === */
+
+.page {
+  min-height: 100vh;
+  background: var(--bg);
+  padding: 100px 24px 80px;
+}
+
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+/* Back link */
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+  margin-bottom: 48px;
+}
+
+.back:hover {
+  color: var(--accent);
+}
+
+/* Page title area */
+.hero {
+  margin-bottom: 72px;
+}
+
+.eyebrow {
+  display: inline-flex;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 229, 209, 0.28);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(0, 229, 209, 0.04);
+  margin-bottom: 20px;
+}
+
+.pageTitle {
+  font-family: var(--font-display);
+  font-size: clamp(36px, 5vw, 56px);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  margin-bottom: 18px;
+  text-wrap: balance;
+}
+
+.pageTitle span {
+  color: var(--accent);
+}
+
+.pageLead {
+  font-size: 17px;
+  color: var(--text-dim);
+  line-height: 1.65;
+  max-width: 680px;
+}
+
+/* Section headings */
+.section {
+  margin-bottom: 64px;
+}
+
+.sectionTitle {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sectionTitle::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(0, 229, 209, 0.12);
+  margin-left: 8px;
+}
+
+.sectionDesc {
+  font-size: 14.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+/* Tool cards */
+.toolGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.toolCard {
+  background: linear-gradient(180deg, #0d1316, #0a0f12);
+  border: 1px solid rgba(0, 229, 209, 0.1);
+  border-radius: 12px;
+  padding: 20px 22px;
+  transition: border-color 0.2s;
+}
+
+.toolCard:hover {
+  border-color: rgba(0, 229, 209, 0.24);
+}
+
+.toolHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.toolName {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.toolBadge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  border: 1px solid rgba(0, 229, 209, 0.18);
+  background: rgba(0, 229, 209, 0.06);
+  color: var(--text-muted);
+}
+
+.toolBadge.public {
+  border-color: rgba(43, 212, 232, 0.3);
+  background: rgba(43, 212, 232, 0.06);
+  color: var(--accent-2);
+}
+
+.toolBadge.dev {
+  border-color: rgba(0, 229, 209, 0.2);
+  color: var(--accent);
+}
+
+.toolBadge.company {
+  border-color: rgba(254, 188, 46, 0.3);
+  background: rgba(254, 188, 46, 0.06);
+  color: #FEBC2E;
+}
+
+.toolDesc {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+/* Tables */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.table th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0, 229, 209, 0.14);
+  font-weight: 500;
+}
+
+.table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(0, 229, 209, 0.06);
+  color: var(--text-dim);
+  line-height: 1.5;
+  vertical-align: top;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover td {
+  background: rgba(0, 229, 209, 0.02);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.errorCode {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #FF6B6B;
+}
+
+.httpStatus {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Code block */
+.codeBlock {
+  background: linear-gradient(180deg, #0d1316 0%, #08090b 100%);
+  border: 1px solid rgba(0, 229, 209, 0.12);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.codeBlockBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(0, 229, 209, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.dotRed    { background: #FF5F57; }
+.dotYellow { background: #FEBC2E; }
+.dotGreen  { background: #28C840; }
+
+.codeBlockTitle {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.codeBlockBody {
+  padding: 18px 20px 22px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.8;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text);
+  margin: 0;
+}
+
+.codeBlockBody code {
+  font-family: inherit;
+  font-size: inherit;
+  background: none;
+  padding: 0;
+  border: none;
+}
+
+/* Auth model block */
+.authBlock {
+  background: linear-gradient(180deg, #0d1316, #0a0f12);
+  border: 1px solid rgba(0, 229, 209, 0.12);
+  border-radius: 12px;
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.authRow {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.authLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  min-width: 100px;
+  padding-top: 2px;
+}
+
+.authValue {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.authValue code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--accent);
+  background: rgba(0, 229, 209, 0.06);
+  border: 1px solid rgba(0, 229, 209, 0.14);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* Onboarding flow steps */
+.flowSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+
+.flowSteps::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: 20px;
+  bottom: 20px;
+  width: 1px;
+  background: linear-gradient(180deg, var(--accent), transparent);
+  opacity: 0.2;
+}
+
+.flowStep {
+  display: flex;
+  gap: 18px;
+  padding: 16px 0;
+}
+
+.flowNum {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(0, 229, 209, 0.08);
+  border: 1px solid rgba(0, 229, 209, 0.2);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.flowContent h4 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.flowContent p {
+  font-size: 13.5px;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.flowContent code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  background: rgba(0, 229, 209, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Bottom CTA */
+.bottomCta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 72px;
+  padding-top: 40px;
+  border-top: 1px solid rgba(0, 229, 209, 0.1);
+}
+
+.ctaPrimary {
+  padding: 12px 22px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--accent);
+  color: #031414;
+  box-shadow: 0 0 0 1px rgba(0,229,209,0.4), 0 6px 24px rgba(0,229,209,0.22);
+  transition: transform .2s, box-shadow .2s;
+  text-decoration: none;
+}
+
+.ctaPrimary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(0,229,209,0.6), 0 10px 32px rgba(0,229,209,0.4);
+}
+
+.ctaGhost {
+  padding: 12px 22px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(0, 229, 209, 0.24);
+  color: var(--text);
+  transition: background .2s, border-color .2s, transform .2s;
+  text-decoration: none;
+}
+
+.ctaGhost:hover {
+  background: rgba(0, 229, 209, 0.07);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 600px) {
+  .page {
+    padding: 80px 16px 60px;
+  }
+  .table th,
+  .table td {
+    padding: 9px 10px;
+    font-size: 12.5px;
+  }
+  .authRow {
+    flex-direction: column;
+    gap: 4px;
+  }
+}
