@@ -416,46 +416,78 @@ export function CreateBountyFlow({
           </button>
         )}
 
-        {step === "confirm" && (
+        {step === "confirm" && (() => {
+          // Pre-compute the review-fee preview. Mirrors the math in
+          // `runRealFlow`; safe to fail open (null) because the form
+          // already validated cap + price at submit time.
+          let reviewFeeSol: number | null = null;
+          let reviewFeeUsd: number | null = null;
+          if (
+            REVIEW_FEE_ENABLED &&
+            typeof data.maxSubmissions === "number" &&
+            data.maxSubmissions > 0 &&
+            typeof data.solUsdPrice === "number"
+          ) {
+            try {
+              const b = computeReviewFee({
+                maxSubmissions: data.maxSubmissions,
+                solPriceUsd: data.solUsdPrice,
+              });
+              reviewFeeSol = b.totalLamports / LAMPORTS_PER_SOL;
+              reviewFeeUsd = b.totalUsd;
+            } catch {
+              /* shouldn't happen — form validates these */
+            }
+          }
+          const totalSol = data.amount + (reviewFeeSol ?? 0);
+          const cap = data.maxSubmissions ?? 0;
+
+          return (
           <>
             <div className="modal-head">
-              <div className="eyebrow">Review bounty</div>
-              <h2 className="modal-title">Confirm &amp; fund escrow</h2>
+              <div className="eyebrow">Are you sure?</div>
+              <h2 className="modal-title fee-headline">
+                {cap} PRs will cost{" "}
+                {reviewFeeUsd != null ? (
+                  <span className="fee-amount">~${reviewFeeUsd.toFixed(2)}</span>
+                ) : null}
+              </h2>
+              {reviewFeeSol != null && (
+                <div className="fee-subhead">
+                  {reviewFeeSol.toFixed(4)} SOL deducted now for AI reviews
+                </div>
+              )}
             </div>
 
             <div className="modal-summary">
               <SummaryRow label="Issue" value={`${data.repo} #${data.issueNumber}`} mono />
-              {data.title && <SummaryRow label="Title" value={data.title} />}
               <SummaryRow
-                label="Bounty"
+                label="Bounty escrow"
                 value={`${data.amount.toLocaleString()} SOL`}
-                highlight
               />
-              <SummaryRow
-                label="Release mode"
-                value={
-                  data.releaseMode === "auto"
-                    ? "Auto-release on AI approval"
-                    : "AI-assisted — you pick winner"
-                }
-              />
-              {data.rejectThreshold != null && (
+              {reviewFeeSol != null && (
                 <SummaryRow
-                  label="Reject threshold"
-                  value={`Score < ${data.rejectThreshold} auto-rejected`}
+                  label="Review fee"
+                  value={`${reviewFeeSol.toFixed(4)} SOL`}
                 />
               )}
-              <SummaryRow label="Network" value="Solana devnet" mono />
+              {reviewFeeSol != null && (
+                <SummaryRow
+                  label="Total deducted"
+                  value={`${totalSol.toFixed(4)} SOL`}
+                  highlight
+                />
+              )}
               <SummaryRow
-                label="Treasury wallet"
+                label="From wallet"
                 value={walletAddress ? shortHex(walletAddress) : "not connected"}
                 mono
               />
             </div>
 
             <p className="modal-note">
-              Funds are locked on-chain in the bounty PDA. They release
-              automatically when the AI validators approve a submission.
+              One signature, one atomic transaction. Unused review slots
+              are refunded if you cancel before the cap fills.
             </p>
 
             <div className="modal-foot">
@@ -468,11 +500,12 @@ export function CreateBountyFlow({
                 disabled={!walletAddress || !walletsReady}
                 title={!walletAddress ? "Connect a wallet first" : undefined}
               >
-                Confirm &amp; fund
+                Confirm &amp; pay
               </button>
             </div>
           </>
-        )}
+          );
+        })()}
 
         {step === "processing" && (
           <>

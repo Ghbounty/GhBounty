@@ -15,8 +15,6 @@ import {
   MAX_SUBMISSIONS_DEFAULT,
   MAX_SUBMISSIONS_MAX,
   MAX_SUBMISSIONS_MIN,
-  REVIEW_COST_USD_PER_REVIEW,
-  REVIEW_FEE_MARKUP,
 } from "@/lib/review-fee";
 import { REVIEW_FEE_ENABLED } from "@/lib/gas-station-client";
 import type { Company } from "@/lib/types";
@@ -463,16 +461,13 @@ export function CreateBountyForm({
             }}
           />
           <span className="field-hint">
-            Each PR is reviewed with Sonnet 4.5 (~${REVIEW_COST_USD_PER_REVIEW.toFixed(2)} per
-            review). The bounty closes automatically when this number is
-            reached. You'll get a refund for any unused review slots if you
-            cancel before the cap fills.
+            The bounty closes automatically when this number is reached.
+            Unused slots are refunded if you cancel before the cap fills.
           </span>
         </label>
 
-        {/* Live review-fee breakdown. Stays in DOM even when invalid so
-            the layout doesn't jump as the user types — placeholder copy
-            tells them why the numbers aren't shown. */}
+        {/* Live review-fee total. Single line, just the SOL amount —
+            internal cost / markup math stays out of the user's view. */}
         {REVIEW_FEE_ENABLED && (
           <div className="field fee-breakdown">
             <span className="field-label">Review fee</span>
@@ -485,18 +480,14 @@ export function CreateBountyForm({
               </span>
             )}
             {feeBreakdown && typeof solUsdPrice === "number" && (
-              <div className="fee-breakdown-rows">
-                <div className="fee-row">
-                  <span>{maxSubsInput} reviews × ${REVIEW_COST_USD_PER_REVIEW.toFixed(2)} × {REVIEW_FEE_MARKUP}× markup</span>
-                  <span>${feeBreakdown.totalUsd.toFixed(2)}</span>
-                </div>
-                <div className="fee-row total">
-                  <span>Charged in SOL @ ${solUsdPrice.toFixed(2)}/SOL</span>
-                  <span>
-                    {(feeBreakdown.totalLamports / LAMPORTS_PER_SOL).toFixed(4)}{" "}
-                    SOL
+              <div className="fee-row total">
+                <span>
+                  {(feeBreakdown.totalLamports / LAMPORTS_PER_SOL).toFixed(4)}{" "}
+                  SOL{" "}
+                  <span className="fee-usd">
+                    (~${feeBreakdown.totalUsd.toFixed(2)})
                   </span>
-                </div>
+                </span>
               </div>
             )}
             {!feeBreakdown && typeof solUsdPrice === "number" && (
