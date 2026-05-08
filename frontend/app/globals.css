@@ -3565,9 +3565,9 @@ section { position: relative; padding: 120px 40px; }
 #team .section-head { margin-bottom: 40px; }
 .team-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
-  max-width: 920px;
+  max-width: 1100px;
   margin: 0 auto;
 }
 .founder-card {
@@ -3629,6 +3629,9 @@ section { position: relative; padding: 120px 40px; }
   background: rgba(0, 229, 209, 0.06);
 }
 
+@media (max-width: 1000px) {
+  .team-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 760px; }
+}
 @media (max-width: 760px) {
   .team-grid { grid-template-columns: 1fr; }
   .founder-card { gap: 16px; padding: 20px; }
