@@ -97,13 +97,14 @@ function CompanyDashboardInner() {
   const totalPaid = bounties
     .filter((b) => b.status === "paid")
     .reduce((s, b) => s + b.amountUsdc, 0);
+  const companyName = company.name?.trim() || "there";
 
   return (
     <div className="dash">
       <section className="dash-hero">
         <div>
           <div className="eyebrow">Company dashboard</div>
-          <h1 className="dash-title">Welcome back, {company.name}</h1>
+          <h1 className="dash-title">Welcome back, {companyName}</h1>
           <p className="dash-sub">{company.description}</p>
         </div>
         <div className="dash-stats">
