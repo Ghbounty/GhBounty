@@ -44,6 +44,8 @@ describe("classifyPath — generated dirs", () => {
     "dist/bundle.js",
     "build/output.html",
     "target/debug/app",
+    "contracts/solana/.anchor/test-ledger/genesis.bin",
+    ".anchor/program-logs/validator.log",
     "node_modules/foo/index.js",
     "relayer/dist/index.js",
     "app/.next/static/chunks/webpack.js",
