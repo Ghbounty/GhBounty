@@ -43,6 +43,14 @@ interface CompleteOk {
 }
 type CompleteResult = CompleteOk | { error: McpError };
 
+export function getChainId(): string {
+  const chainId = process.env.CHAIN_ID;
+  if (!chainId) {
+    throw new Error("CHAIN_ID must be set");
+  }
+  return chainId;
+}
+
 export async function handleCreateAccountComplete(raw: unknown): Promise<CompleteResult> {
   const parsed = CompleteInput.safeParse(raw);
   if (!parsed.success) {
@@ -153,7 +161,7 @@ export async function handleCreateAccountComplete(raw: unknown): Promise<Complet
 
   await supabase.from("wallets").insert({
     user_id: userId,
-    chain_id: "solana-mainnet",
+    chain_id: getChainId(),
     address: ag.wallet_pubkey,
   });
 
