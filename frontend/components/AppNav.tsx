@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import { useAuth, usePrivyBackend } from "@/lib/auth-context";
 import { useWallets } from "@privy-io/react-auth/solana";
@@ -109,6 +109,38 @@ export function AppNav() {
     balanceSol !== null &&
     balanceSol > 0;
 
+  // Two header dropdowns: wallet (address/balance/Deposit/Withdraw) and
+  // account (Profile/Log out). Both mirror the click-outside + Escape
+  // pattern from BountyEditMenu so the affordance is consistent.
+  const [walletOpen, setWalletOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const walletWrapRef = useRef<HTMLDivElement | null>(null);
+  const accountWrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!walletOpen && !accountOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (walletOpen && !walletWrapRef.current?.contains(target)) {
+        setWalletOpen(false);
+      }
+      if (accountOpen && !accountWrapRef.current?.contains(target)) {
+        setAccountOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setWalletOpen(false);
+        setAccountOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [walletOpen, accountOpen]);
+
   return (
     <header className="appnav">
       <div className="appnav-inner">
@@ -132,40 +164,99 @@ export function AppNav() {
         </nav>
         <div className="appnav-right">
           {walletAddress ? (
-            <>
+            <div className="menu-wrap" ref={walletWrapRef}>
               <button
                 type="button"
                 className="wallet-btn connected"
-                onClick={handleCopy}
-                title="Click to copy address"
+                aria-haspopup="menu"
+                aria-expanded={walletOpen}
+                onClick={() => setWalletOpen((o) => !o)}
               >
                 <span className="wallet-btn-dot" />
-                <code>{copied ? "Copied!" : shortWallet(walletAddress)}</code>
+                <code>{shortWallet(walletAddress)}</code>
                 {balanceSol !== null && (
                   <span className="wallet-btn-balance">
                     {balanceSol.toFixed(3)} SOL
                   </span>
                 )}
+                <svg
+                  className="wallet-btn-chevron"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </button>
-              <button
-                type="button"
-                className="wallet-chip wallet-chip-deposit"
-                onClick={() => setDepositOpen(true)}
-                disabled={!privyMode}
-                title="Receive SOL into your Privy wallet"
-              >
-                Deposit
-              </button>
-              <button
-                type="button"
-                className="wallet-chip wallet-chip-withdraw"
-                onClick={() => setWithdrawOpen(true)}
-                disabled={!canWithdraw}
-                title="Send SOL from your Privy wallet to an external address"
-              >
-                Withdraw
-              </button>
-            </>
+              {walletOpen && (
+                <div className="menu-dropdown wallet-menu" role="menu">
+                  <div className="wallet-menu-info">
+                    <div className="wallet-menu-row">
+                      <code className="wallet-menu-address" title={walletAddress}>
+                        {shortWallet(walletAddress)}
+                      </code>
+                      <button
+                        type="button"
+                        className="wallet-menu-copy"
+                        onClick={handleCopy}
+                        title="Copy full address"
+                      >
+                        {copied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                    <div className="wallet-menu-row">
+                      <span className="wallet-menu-label">Balance</span>
+                      <span className="wallet-menu-balance">
+                        {balanceSol !== null
+                          ? `${balanceSol.toFixed(3)} SOL`
+                          : "—"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="menu-sep" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setWalletOpen(false);
+                      setDepositOpen(true);
+                    }}
+                    disabled={!privyMode}
+                    title="Receive SOL into your Privy wallet"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <polyline points="19 12 12 19 5 12" />
+                    </svg>
+                    Deposit
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      setWalletOpen(false);
+                      setWithdrawOpen(true);
+                    }}
+                    disabled={!canWithdraw}
+                    title="Send SOL from your Privy wallet to an external address"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="19" x2="12" y2="5" />
+                      <polyline points="5 12 12 5 19 12" />
+                    </svg>
+                    Withdraw
+                  </button>
+                </div>
+              )}
+            </div>
           ) : (
             <button className="wallet-btn" onClick={handleConnect}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -182,33 +273,80 @@ export function AppNav() {
           {(privyMode || useSupabaseBackend) && (
             <NotificationsBell userId={user.id} />
           )}
-          <Link
-            href="/app/profile"
-            className={`appnav-user ${pathname === "/app/profile" ? "active" : ""}`}
-            aria-label="Open profile"
-          >
-            <Avatar
-              src={user.avatarUrl}
-              name={displayName}
-              size={32}
-              rounded={!isCompany}
-            />
-            <div className="appnav-user-meta">
-              <span className="appnav-user-name">{displayName}</span>
-              <span className="appnav-user-role">
-                {isCompany ? "Company" : "Developer"}
-              </span>
-            </div>
-          </Link>
-          <button
-            className="appnav-logout"
-            onClick={async () => {
-              await logout();
-              router.push("/app/auth");
-            }}
-          >
-            Log out
-          </button>
+          <div className="menu-wrap appnav-user-wrap" ref={accountWrapRef}>
+            <button
+              type="button"
+              className={`appnav-user ${accountOpen || pathname === "/app/profile" ? "active" : ""}`}
+              aria-label="Account menu"
+              aria-haspopup="menu"
+              aria-expanded={accountOpen}
+              onClick={() => setAccountOpen((o) => !o)}
+            >
+              <Avatar
+                src={user.avatarUrl}
+                name={displayName}
+                size={32}
+                rounded={!isCompany}
+              />
+              <div className="appnav-user-meta">
+                <span className="appnav-user-name">{displayName}</span>
+                <span className="appnav-user-role">
+                  {isCompany ? "Company" : "Developer"}
+                </span>
+              </div>
+              <svg
+                className="appnav-user-chevron"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            {accountOpen && (
+              <div className="menu-dropdown" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    setAccountOpen(false);
+                    router.push("/app/profile");
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                  Profile
+                </button>
+                <div className="menu-sep" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item danger"
+                  onClick={async () => {
+                    setAccountOpen(false);
+                    await logout();
+                    router.push("/app/auth");
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

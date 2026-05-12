@@ -2,6 +2,7 @@
 :root {
   --bg: #05080A;
   --bg-2: #0A0F12;
+  --bg-elev: #0B1014;
   --surface: #0D1316;
   --surface-2: #121A1E;
   --border: rgba(0, 229, 209, 0.12);
@@ -645,14 +646,6 @@ section { position: relative; padding: 120px 40px; }
   font-family: var(--font-mono); font-size: 10px;
   letter-spacing: .14em; text-transform: uppercase; color: var(--text-muted);
 }
-.appnav-logout {
-  padding: 7px 14px; border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 12px; color: var(--text-dim);
-  transition: border-color .2s, color .2s;
-}
-.appnav-logout:hover { border-color: var(--border-strong); color: var(--accent); }
-
 /* --- connect wallet button in app nav --- */
 .wallet-btn {
   display: inline-flex; align-items: center; gap: 8px;
@@ -697,42 +690,69 @@ section { position: relative; padding: 120px 40px; }
   font-weight: 500;
 }
 
-/* GHB-83+84: chip-sized Deposit / Withdraw next to the wallet pill in
- * the header. Match the height/border-radius of `.wallet-btn.connected`
- * so the row reads as one unit; they're noticeably smaller in width. */
-.wallet-chip {
-  font-family: var(--font-sans);
-  font-size: 10.5px;
-  letter-spacing: .1em;
+/* GHB-185: wallet pill is now a dropdown trigger. Address copy, balance
+ * detail, Deposit and Withdraw all live inside the menu instead of
+ * competing as standalone pills in the header. */
+.wallet-btn-chevron {
+  margin-left: 4px;
+  color: var(--accent);
+  opacity: 0.7;
+  transition: transform .15s, opacity .15s;
+}
+.wallet-btn[aria-expanded="true"] .wallet-btn-chevron {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+.wallet-menu { min-width: 240px; }
+.wallet-menu-info { padding: 4px 4px 6px; }
+.wallet-menu-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+}
+.wallet-menu-address {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+.wallet-menu-label {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.wallet-menu-balance {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 500;
+}
+.wallet-menu-copy {
+  font-size: 11px;
+  letter-spacing: .08em;
   text-transform: uppercase;
   font-weight: 600;
-  padding: 6px 12px;
-  border-radius: 999px;
-  cursor: pointer;
-  transition: background-color .12s, border-color .12s, color .12s, transform .08s;
-}
-.wallet-chip:hover:not(:disabled) { transform: translateY(-1px); }
-.wallet-chip:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-.wallet-chip-deposit {
-  background: transparent;
-  border: 1px solid var(--accent);
   color: var(--accent);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  transition: background .15s, border-color .15s;
 }
-.wallet-chip-deposit:hover:not(:disabled) {
-  background: rgba(0, 229, 209, 0.12);
+.wallet-menu-copy:hover {
+  background: rgba(0, 229, 209, 0.08);
+  border-color: var(--border-strong);
 }
-.wallet-chip-withdraw {
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: #002a26;
+
+/* Disabled menu items (used by Deposit when not in Privy mode and
+ * Withdraw when balance is 0). Keeps the row visible but inert. */
+.menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
-.wallet-chip-withdraw:hover:not(:disabled) {
-  background: rgba(0, 229, 209, 0.85);
-}
-.wallet-chip-withdraw:disabled {
+.menu-item:disabled:hover {
   background: transparent;
-  color: var(--text-dim);
-  border-color: var(--border);
+  color: var(--text);
 }
 
 /* ---- GHB-92: notifications bell + dropdown ---- */
@@ -2500,7 +2520,6 @@ section { position: relative; padding: 120px 40px; }
   .appnav-tab { padding: 6px 12px; font-size: 12px; flex-shrink: 0; }
   .appnav-right { gap: 10px; }
   .appnav-user-meta { display: none; }
-  .appnav-logout { padding: 7px 12px; font-size: 11.5px; }
   .wallet-btn { padding: 6px 12px; font-size: 11.5px; }
   .wallet-btn svg { width: 12px; height: 12px; }
 
@@ -2578,7 +2597,6 @@ section { position: relative; padding: 120px 40px; }
   .appnav-inner { padding: 10px 12px; }
   .appnav-logo img { height: 18px; }
   .appnav-tab { padding: 5px 10px; font-size: 11.5px; }
-  .appnav-logout { padding: 6px 10px; }
   .wallet-btn { padding: 5px 10px; font-size: 10.5px; gap: 5px; }
 
   .dash-title { font-size: 26px; }
@@ -3150,10 +3168,10 @@ section { position: relative; padding: 120px 40px; }
   width: 100%;
 }
 
-/* --- AppNav user as link --- */
+/* --- AppNav user as account-menu trigger --- */
 .appnav-user {
   display: flex; align-items: center; gap: 10px;
-  padding: 4px 10px 4px 4px;
+  padding: 4px 12px 4px 4px;
   border-radius: 999px;
   border: 1px solid transparent;
   transition: background .2s, border-color .2s;
@@ -3163,6 +3181,12 @@ section { position: relative; padding: 120px 40px; }
   background: rgba(0, 229, 209, 0.08);
   border-color: var(--border-strong);
 }
+.appnav-user-chevron {
+  color: var(--text-muted);
+  transition: transform .15s, color .15s;
+}
+.appnav-user.active .appnav-user-chevron { color: var(--accent); }
+.appnav-user[aria-expanded="true"] .appnav-user-chevron { transform: rotate(180deg); }
 
 /* =========================================================
    SUBMITTED PILL + submission statuses
