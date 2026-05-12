@@ -42,6 +42,6 @@ The agentic onboarding flow (`create_account.init/poll/complete`) is currently *
 Existing api_keys (minted from previous mainnet sessions, or via the admin minting script `scripts/mint-test-api-key.mjs`) continue to work for authenticating MCP tool calls.
 
 Track:
-- Current network: see `CHAIN_ID` env var. Server is currently on `solana-devnet` (faucet SOL, no real money).
+- Current network: see `CHAIN_ID` env var. Once it's set to `solana-devnet` (deployment env), the server runs against devnet (faucet SOL, no real money).
 - Reactivation of onboarding: GHB-188.
 - New on-chain tools (`submit_pr`, `check_status`): GHB-187.
