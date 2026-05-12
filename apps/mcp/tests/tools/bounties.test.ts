@@ -2,13 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/supabase/admin", () => ({ supabaseAdmin: vi.fn() }));
 vi.mock("@/lib/auth/middleware");
+vi.mock("@/lib/tools/create-account/complete", () => ({
+  getChainId: () => "solana-mainnet",
+}));
 
 import { handleBountiesList } from "@/lib/tools/bounties/list";
 import { authenticate } from "@/lib/auth/middleware";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 describe("bounties.list", () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    process.env.CHAIN_ID = "solana-mainnet";
+  });
 
   it("returns Unauthorized when not authed", async () => {
     (authenticate as any).mockResolvedValue({
@@ -27,8 +33,8 @@ describe("bounties.list", () => {
 
     (supabaseAdmin as any).mockReturnValue({
       from: () => ({
-        select: () => ({
-          eq: () => ({
+        select: () => {
+          const orderLimit = {
             order: () => ({
               limit: () =>
                 Promise.resolve({
@@ -46,8 +52,10 @@ describe("bounties.list", () => {
                   error: null,
                 }),
             }),
-          }),
-        }),
+          };
+          const eq2 = { ...orderLimit, eq: () => orderLimit };
+          return { eq: () => eq2 };
+        },
       }),
     });
 
@@ -62,7 +70,10 @@ describe("bounties.list", () => {
 });
 
 describe("bounties.get", () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    process.env.CHAIN_ID = "solana-mainnet";
+  });
 
   it("returns 404 for unknown id", async () => {
     const { handleBountiesGet } = await import("@/lib/tools/bounties/get");
@@ -72,11 +83,11 @@ describe("bounties.get", () => {
     });
     (supabaseAdmin as any).mockReturnValue({
       from: () => ({
-        select: () => ({
-          eq: () => ({
-            maybeSingle: () => Promise.resolve({ data: null, error: null }),
-          }),
-        }),
+        select: () => {
+          const ms = { maybeSingle: () => Promise.resolve({ data: null, error: null }) };
+          const eq2 = { ...ms, eq: () => ms };
+          return { eq: () => eq2 };
+        },
       }),
     });
 

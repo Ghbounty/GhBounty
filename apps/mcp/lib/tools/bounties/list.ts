@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authenticate } from "@/lib/auth/middleware";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { mcpError } from "@/lib/errors";
+import { getChainId } from "@/lib/tools/create-account/complete";
 
 const ListInput = z.object({
   authorization: z.string().optional(),
@@ -30,7 +31,8 @@ export async function handleBountiesList(raw: unknown) {
     .from("issues")
     .select(
       "id, amount, state, github_issue_url, submission_count, bounty_meta(title, description, release_mode), created_at"
-    );
+    )
+    .eq("chain_id", getChainId());
 
   if (filter.status) q = q.eq("state", filter.status);
 

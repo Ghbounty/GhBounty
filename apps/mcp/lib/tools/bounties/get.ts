@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authenticate } from "@/lib/auth/middleware";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { mcpError } from "@/lib/errors";
+import { getChainId } from "@/lib/tools/create-account/complete";
 
 const GetInput = z.object({
   authorization: z.string().optional(),
@@ -24,6 +25,7 @@ export async function handleBountiesGet(raw: unknown) {
       "id, amount, state, pda, github_issue_url, submission_count, bounty_meta(title, description, release_mode, evaluation_criteria, reject_threshold), created_at, creator"
     )
     .eq("id", parsed.data.id)
+    .eq("chain_id", getChainId())
     .maybeSingle();
 
   if (error) return { error: mcpError("InternalError", error.message) };
