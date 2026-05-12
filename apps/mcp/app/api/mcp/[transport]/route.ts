@@ -23,3 +23,4 @@ export { handler as GET, handler as POST, handler as DELETE };
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+export const runtime = "edge";
