@@ -92,6 +92,7 @@ function CompanyDashboardInner() {
   }, [bounties]);
 
   const filtered = bounties.filter((b) => matchesFilter(b, filter));
+  const companyDisplayName = company.name?.trim() || "there";
 
   const totalFunded = bounties.reduce((s, b) => s + b.amountUsdc, 0);
   const totalPaid = bounties
@@ -103,7 +104,7 @@ function CompanyDashboardInner() {
       <section className="dash-hero">
         <div>
           <div className="eyebrow">Company dashboard</div>
-          <h1 className="dash-title">Welcome back, {company.name}</h1>
+          <h1 className="dash-title">Welcome back, {companyDisplayName}</h1>
           <p className="dash-sub">{company.description}</p>
         </div>
         <div className="dash-stats">
