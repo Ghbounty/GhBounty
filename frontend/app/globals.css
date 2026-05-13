@@ -823,6 +823,11 @@ section { position: relative; padding: 120px 40px; }
   font-weight: 600;
   font-size: 13px;
 }
+.notif-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 .notif-mark-all {
   background: transparent;
   border: none;
