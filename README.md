@@ -1,5 +1,19 @@
 # Ghbounty
 
+## Quick Start
+
+Prerequisites:
+
+- Node 24+
+- pnpm 10+
+- Solana CLI
+
+```bash
+pnpm install
+cp frontend/.env.example frontend/.env.local
+pnpm dev
+```
+
 > Automated GitHub bounty marketplace with AI-verified PRs. Opus analyzes, GenLayer juries on-chain, humans pick the winner. Solana-first, agent-native via x402 + MCP.
 
 ## What it is
