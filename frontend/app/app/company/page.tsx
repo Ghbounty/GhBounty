@@ -9,6 +9,7 @@ import { CreateBountyForm } from "@/components/CreateBountyForm";
 import { ReleaseModeBadge } from "@/components/ReleaseModePicker";
 import { SubmissionsListModal } from "@/components/SubmissionsListModal";
 import { useAuth } from "@/lib/auth";
+import { formatCompanyGreetingName } from "@/lib/company-display";
 import { fetchBountiesByCompany } from "@/lib/data";
 import type { Bounty, Company } from "@/lib/types";
 
@@ -92,7 +93,7 @@ function CompanyDashboardInner() {
   }, [bounties]);
 
   const filtered = bounties.filter((b) => matchesFilter(b, filter));
-  const companyDisplayName = company.name?.trim() || "there";
+  const companyDisplayName = formatCompanyGreetingName(company.name);
 
   const totalFunded = bounties.reduce((s, b) => s + b.amountUsdc, 0);
   const totalPaid = bounties
