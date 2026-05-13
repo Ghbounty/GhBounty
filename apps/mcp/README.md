@@ -34,3 +34,14 @@ Upstash Redis is provisioned via Vercel Marketplace (Project Settings → Storag
 ## Tools
 
 See `lib/tools/` for the implementations. Surface and contracts documented in `docs/superpowers/specs/2026-05-05-ghbounty-mcp-server-design.md` section 6.
+
+## ⚠️ Onboarding temporarily unavailable via MCP
+
+The agentic onboarding flow (`create_account.init/poll/complete`) is currently **not validated against devnet** and may fail. Working alternative is being built in GHB-188 (frontend MCP onboarding sprint), which moves account creation + stake to the web UI.
+
+Existing api_keys (minted from previous mainnet sessions, or via the admin minting script `scripts/mint-test-api-key.mjs`) continue to work for authenticating MCP tool calls.
+
+Track:
+- Current network: see `CHAIN_ID` env var. Once it's set to `solana-devnet` (deployment env), the server runs against devnet (faucet SOL, no real money).
+- Reactivation of onboarding: GHB-188.
+- New on-chain tools (`submit_pr`, `check_status`): GHB-187.

@@ -63,13 +63,12 @@ interface PollReady {
 }
 type PollResult = PollPending | PollReady | { error: McpError };
 
-function getProgramAddress(): string {
-  // The IDL-generated GHBOUNTY_ESCROW_PROGRAM_ADDRESS is "" (empty).
-  // Read the real address from env; fall back to the devnet address from Anchor.toml.
-  return (
-    process.env.GHBOUNTY_PROGRAM_ADDRESS ??
-    "CPZx26QXs3HjwGobr8cVAZEtF1qGzqnNbBdt7h1EwbBg"
-  );
+export function getProgramAddress(): string {
+  const addr = process.env.GHBOUNTY_PROGRAM_ADDRESS;
+  if (!addr) {
+    throw new Error("GHBOUNTY_PROGRAM_ADDRESS must be set");
+  }
+  return addr;
 }
 
 export async function handleCreateAccountPoll(raw: unknown): Promise<PollResult> {
