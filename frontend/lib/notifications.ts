@@ -178,6 +178,18 @@ export async function markAllRead(
   if (error) console.warn("[markAllRead]", error);
 }
 
+/** Delete all notifications for the current user. */
+export async function clearNotifications(
+  supabase: DBClient,
+  userId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("notifications" as never)
+    .delete()
+    .eq("user_id", userId);
+  if (error) console.warn("[clearNotifications]", error);
+}
+
 /* ---------------------------------------------------------------- */
 /* Writers — call from the action that produced the event.           */
 /* ---------------------------------------------------------------- */
