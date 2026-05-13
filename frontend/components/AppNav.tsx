@@ -9,6 +9,7 @@ import { useAuth, usePrivyBackend } from "@/lib/auth-context";
 import { useWallets } from "@privy-io/react-auth/solana";
 import { mockWallet, setWallet } from "@/lib/store";
 import { getConnection } from "@/lib/solana";
+import { companyDisplayName } from "@/lib/display-names";
 import { Avatar } from "./Avatar";
 import { DepositModal } from "./DepositModal";
 import { WithdrawModal } from "./WithdrawModal";
@@ -35,7 +36,7 @@ export function AppNav() {
   if (!user) return null;
 
   const isCompany = user.role === "company";
-  const displayName = isCompany ? user.name : user.username;
+  const displayName = isCompany ? companyDisplayName(user.name) : user.username;
   const walletAddress = privyMode ? privyWallet : user.wallet ?? null;
 
   const tabs = isCompany
