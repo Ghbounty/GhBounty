@@ -10,6 +10,7 @@ import { ReleaseModeBadge } from "@/components/ReleaseModePicker";
 import { SubmissionsListModal } from "@/components/SubmissionsListModal";
 import { useAuth } from "@/lib/auth";
 import { fetchBountiesByCompany } from "@/lib/data";
+import { companyGreetingName } from "@/lib/display-names";
 import type { Bounty, Company } from "@/lib/types";
 
 type Filter = "all" | "open" | "reviewing" | "approved" | "rejected" | "paid" | "closed";
@@ -103,7 +104,9 @@ function CompanyDashboardInner() {
       <section className="dash-hero">
         <div>
           <div className="eyebrow">Company dashboard</div>
-          <h1 className="dash-title">Welcome back, {company.name}</h1>
+          <h1 className="dash-title">
+            Welcome back, {companyGreetingName(company.name)}
+          </h1>
           <p className="dash-sub">{company.description}</p>
         </div>
         <div className="dash-stats">
