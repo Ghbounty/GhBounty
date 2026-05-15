@@ -83,6 +83,14 @@ export const GENERATED_DIR_PREFIXES = [
   ".ruff_cache/",
   ".venv/",
   "venv/",
+  // Anchor framework (Solana). Sibling to Cargo's `target/` which is
+  // already covered above, but `.anchor/` holds the test-ledger
+  // genesis, IDL caches, and program-test snapshots that change on
+  // every `anchor build` / `anchor test` run. We use Anchor in this
+  // very repo at `contracts/solana/`, so PRs touching escrow
+  // instructions previously leaked these regen artifacts into the
+  // diff Sonnet scored.
+  ".anchor/",
 ];
 
 export const GENERATED_FILE_SUFFIXES = [
