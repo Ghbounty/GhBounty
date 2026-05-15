@@ -11,8 +11,9 @@ export default function AppIndex() {
   useEffect(() => {
     if (!ready) return;
     if (pendingOnboarding) {
-      // Privy authed but no profile row yet — send through onboarding.
-      router.replace("/app/onboarding");
+      // Privy authed but no profile row yet — send through the role-picker
+      // signup so they end up on the dedicated dev/company form.
+      router.replace("/app/auth/signup");
       return;
     }
     if (!user) {

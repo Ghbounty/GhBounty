@@ -8,8 +8,8 @@ export type AuthContextValue = {
   ready: boolean;
   // GHB-165: true when the wallet authenticated through Privy but no
   // `profiles` row exists yet. The route layer uses this to send the user
-  // to /app/onboarding instead of /app/auth. Other auth backends leave it
-  // `false`.
+  // to /app/auth/signup (role picker → dedicated form) instead of
+  // /app/auth. Other auth backends leave it `false`.
   pendingOnboarding?: boolean;
   // Surface for errors from the post-auth persist effect. The signup forms
   // submit + open Privy and then await the user redirect; if the persist
