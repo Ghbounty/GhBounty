@@ -36,6 +36,13 @@
       "when": 1778889600000,
       "tag": "0021_chain_registry_devnet",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1779494400000,
+      "tag": "0022_submissions_issue_pda_fk",
+      "breakpoints": true
     }
   ]
 }

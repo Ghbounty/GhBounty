@@ -111,7 +111,9 @@ export const submissions = pgTable("submissions", {
   chainId: text("chain_id")
     .notNull()
     .references(() => chainRegistry.chainId),
-  issuePda: text("issue_pda").notNull(),
+  issuePda: text("issue_pda")
+    .notNull()
+    .references(() => issues.pda),
   pda: text("pda").notNull().unique(),
   solver: text("solver").notNull(),
   submissionIndex: integer("submission_index").notNull(),
