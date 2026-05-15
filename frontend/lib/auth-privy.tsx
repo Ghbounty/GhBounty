@@ -17,7 +17,7 @@
  *   - First time: Privy authenticated, but no row in `profiles`. We expose
  *     `needsOnboarding=true` via the user object being null while
  *     `privy.authenticated=true`. The route layer decides what to render
- *     (onboarding form, GHB-165 follow-up).
+ *     (signup role picker at /app/auth/signup, GHB-165 follow-up).
  *   - Returning: profile exists → we hydrate the User from Supabase, same
  *     shape as the Supabase-Auth path.
  *
@@ -274,7 +274,7 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
   //   - First-time user with `pendingRef` → run the persist + reload.
   //   - First-time user without pendingRef → leave user null;
   //     `pendingOnboarding` flips true and the route layer sends them
-  //     to /app/onboarding (fallback path; the wizard on /app/auth
+  //     to /app/auth/signup (fallback path; the wizard on /app/auth
   //     should populate pendingRef in the happy path).
   useEffect(() => {
     let cancelled = false;
@@ -450,7 +450,7 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
 
   // True only once the Privy session is live, the bridge has had a chance
   // to mint, and Supabase still returned no profile. The route layer uses
-  // this to choose between /app/auth and /app/onboarding.
+  // this to choose between /app/auth and /app/auth/signup.
   const pendingOnboarding = privy.ready && privy.authenticated && !hydrating && !user;
 
   return (

@@ -9,9 +9,9 @@ import { usePrivyBackend } from "@/lib/auth-context";
  * "Connect Wallet" button shown on /app/auth when NEXT_PUBLIC_USE_PRIVY=1.
  *
  * GHB-165: stores the role hint in localStorage as a UX nudge for the
- * onboarding form, then redirects to `/app` after Privy authenticates.
+ * signup form, then redirects to `/app` after Privy authenticates.
  * The index page reads `pendingOnboarding` from the auth context and
- * sends the user to /app/onboarding (no profile yet) or to their dashboard
+ * sends the user to /app/auth/signup (no profile yet) or to their dashboard
  * (returning user with profile already in Supabase).
  */
 export function PrivyLoginButton({

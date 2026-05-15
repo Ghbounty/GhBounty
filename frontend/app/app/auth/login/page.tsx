@@ -26,9 +26,10 @@ export default function LoginPage() {
     // the wallet button on this page. Without this branch the button
     // sticks on "Connecting…" forever because the user state never
     // populates (loadUser returns null with no profile). Mirrors the
-    // `/app/page.tsx` route guard.
+    // `/app/page.tsx` route guard. Route to the role-picker signup so
+    // they land on the right dedicated form (dev or company).
     if (pendingOnboarding) {
-      router.replace("/app/onboarding");
+      router.replace("/app/auth/signup");
       return;
     }
     if (user) {
