@@ -19,7 +19,7 @@ export async function handleSubmissionsGet(raw: unknown) {
   const supabase = supabaseAdmin();
   const { data, error } = await supabase
     .from("submissions")
-    .select("id, solver, pr_url, score, state, opus_report_hash, bounty:issue_pda(creator)")
+    .select("id, pda, solver, pr_url, state, rank, opus_report_hash, bounty:issue_pda(creator)")
     .eq("id", parsed.data.submission_id)
     .maybeSingle();
 
@@ -36,13 +36,37 @@ export async function handleSubmissionsGet(raw: unknown) {
     return { error: mcpError("Forbidden", "Not authorized to view this submission") };
   }
 
+  // `score` doesn't live on `submissions` — it's in `evaluations` (one row per
+  // source: stub | opus | genlayer, plus retries). For state=pending there's
+  // no evaluation yet. For any other state, return the most recent one and
+  // its source so the agent knows where the number came from.
+  let score: number | null = null;
+  let scoreSource: string | null = null;
+  if (row.state !== "pending") {
+    const { data: evalRow, error: evalError } = await supabase
+      .from("evaluations")
+      .select("score, source")
+      .eq("submission_pda", row.pda)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (evalError) return { error: mcpError("InternalError", evalError.message) };
+    if (evalRow) {
+      score = (evalRow as any).score;
+      scoreSource = (evalRow as any).source;
+    }
+  }
+
   return {
     submission: {
       id: row.id,
       solver: row.solver,
       pr_url: row.pr_url,
-      score: row.score,
       state: row.state,
+      score,
+      score_source: scoreSource,
+      rank: row.rank,
       opus_report_hash: row.opus_report_hash,
     },
   };
