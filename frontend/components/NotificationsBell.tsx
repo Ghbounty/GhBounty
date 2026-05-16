@@ -22,6 +22,7 @@ import {
   fetchNotifications,
   fetchUnreadCount,
   markAllRead,
+  clearNotifications,
   markNotificationRead,
   type Notification,
 } from "@/lib/notifications";
@@ -115,6 +116,13 @@ export function NotificationsBell({ userId }: { userId: string }) {
     await markAllRead(supabase, userId);
   }
 
+  async function onClearAll() {
+    setItems([]);
+    setUnread(0);
+    const supabase = createClient();
+    await clearNotifications(supabase, userId);
+  }
+
   const hasItems = items.length > 0;
   const badge = unread > 99 ? "99+" : unread > 0 ? String(unread) : null;
 
@@ -146,15 +154,26 @@ export function NotificationsBell({ userId }: { userId: string }) {
         <div className="notif-panel" role="menu">
           <div className="notif-panel-head">
             <span className="notif-panel-title">Notifications</span>
-            {unread > 0 && (
-              <button
-                type="button"
-                className="notif-mark-all"
-                onClick={onMarkAll}
-              >
-                Mark all read
-              </button>
-            )}
+            <span className="notif-panel-actions">
+              {unread > 0 && (
+                <button
+                  type="button"
+                  className="notif-mark-all"
+                  onClick={onMarkAll}
+                >
+                  Mark all read
+                </button>
+              )}
+              {hasItems && (
+                <button
+                  type="button"
+                  className="notif-mark-all"
+                  onClick={onClearAll}
+                >
+                  Clear all
+                </button>
+              )}
+            </span>
           </div>
 
           {loading && <div className="notif-state">Loading…</div>}
