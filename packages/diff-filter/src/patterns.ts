@@ -67,6 +67,7 @@ export const GENERATED_DIR_PREFIXES = [
   "build/",
   "out/",
   "target/",
+  ".anchor/",
   ".next/",
   ".nuxt/",
   ".svelte-kit/",

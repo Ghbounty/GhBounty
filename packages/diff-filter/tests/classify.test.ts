@@ -46,6 +46,8 @@ describe("classifyPath — generated dirs", () => {
     "target/debug/app",
     "node_modules/foo/index.js",
     "relayer/dist/index.js",
+    ".anchor/program-logs/program.log",
+    "contracts/solana/.anchor/program-keypair.json",
     "app/.next/static/chunks/webpack.js",
     "coverage/lcov-report/index.html",
     "__pycache__/module.cpython-311.pyc",
