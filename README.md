@@ -37,6 +37,15 @@ MVP in progress. Current focus: Phase 1 (Core MVP on Solana).
 - [ ] Agents: x402 + MCP server + agent wallets
 - [ ] Base as second chain (Phase 2)
 
+## Quick Start
+
+```bash
+pnpm install
+pnpm --filter frontend dev
+```
+
+The frontend starts on `http://localhost:3000` by default. Copy any needed environment values from the package-specific `.env.example` files before running services that talk to wallets, Supabase, or the relayer.
+
 ## Stack
 
 - **Frontend:** Next.js + Vercel, RainbowKit (EVM) + wallet-adapter (Solana)
