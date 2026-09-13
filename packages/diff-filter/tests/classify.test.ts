@@ -15,6 +15,9 @@ describe("classifyPath — lockfiles", () => {
     "uv.lock",
     "relayer/pnpm-lock.yaml",
     "nested/deep/Cargo.lock",
+    "Package.resolved",
+    "pdm.lock",
+    "esy.lock",
   ])("marks %s as lockfile", (path) => {
     const r = classifyPath(path);
     expect(r.ignore).toBe(true);
@@ -49,6 +52,16 @@ describe("classifyPath — generated dirs", () => {
     "app/.next/static/chunks/webpack.js",
     "coverage/lcov-report/index.html",
     "__pycache__/module.cpython-311.pyc",
+    "_build/lib/app.beam",
+    ".elixir-ls/trace.json",
+    ".clj-kondo/config.edn",
+    ".shadow-cljs/builds/app.cljs",
+    ".cargo/registry/cache",
+    ".rust-analyzer/metadata.json",
+    ".swiftpm/packages.json",
+    "DerivedData/Build/index",
+    ".bun/install/cache.tar",
+    ".deno/cache/deps.js",
   ])("marks %s as generated_dir", (path) => {
     const r = classifyPath(path);
     expect(r.ignore).toBe(true);

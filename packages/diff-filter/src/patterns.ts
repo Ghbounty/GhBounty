@@ -12,6 +12,9 @@ export const LOCKFILE_NAMES = new Set<string>([
   "flake.lock",
   "go.sum",
   "uv.lock",
+  "Package.resolved",
+  "pdm.lock",
+  "esy.lock",
 ]);
 
 export const BINARY_EXTENSIONS = new Set<string>([
@@ -83,6 +86,16 @@ export const GENERATED_DIR_PREFIXES = [
   ".ruff_cache/",
   ".venv/",
   "venv/",
+  "_build/",
+  ".elixir-ls/",
+  ".clj-kondo/",
+  ".shadow-cljs/",
+  ".cargo/",
+  ".rust-analyzer/",
+  ".swiftpm/",
+  "DerivedData/",
+  ".bun/",
+  ".deno/",
 ];
 
 export const GENERATED_FILE_SUFFIXES = [
