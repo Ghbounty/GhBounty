@@ -4,6 +4,7 @@ import { authenticate } from "@/lib/auth/middleware";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { mcpError } from "@/lib/errors";
 import { getChainId } from "@/lib/config";
+import { deriveBountyStatus, fetchBountyEnrichment } from "./status";
 
 const GetInput = z.object({
   authorization: z.string().optional(),
@@ -22,7 +23,7 @@ export async function handleBountiesGet(raw: unknown) {
   const { data, error } = await supabase
     .from("issues")
     .select(
-      "id, amount, state, pda, github_issue_url, submission_count, bounty_meta(title, description, release_mode, evaluation_criteria, reject_threshold), created_at, creator"
+      "id, amount, state, pda, github_issue_url, submission_count, bounty_meta(title, description, release_mode, evaluation_criteria, reject_threshold, closed_by_user, closed_by_cap_at), created_at, creator"
     )
     .eq("id", parsed.data.id)
     .eq("chain_id", getChainId())
@@ -33,6 +34,21 @@ export async function handleBountiesGet(raw: unknown) {
 
   const row = data as any;
   const meta = Array.isArray(row.bounty_meta) ? row.bounty_meta[0] : row.bounty_meta;
+
+  // Dashboard-equivalent status: live submission count + approved flag
+  // beat the lagging on-chain mirror columns.
+  const enrichment = row.pda
+    ? await fetchBountyEnrichment([row.pda])
+    : { counts: new Map<string, number>(), approvedPdas: new Set<string>() };
+  const liveCount = enrichment.counts.get(row.pda);
+  const submissionCount = liveCount ?? row.submission_count ?? 0;
+  const status = deriveBountyStatus({
+    state: row.state,
+    closedByUser: meta?.closed_by_user === true,
+    closedByCap: meta?.closed_by_cap_at != null,
+    submissionCount,
+    hasApprovedSubmission: enrichment.approvedPdas.has(row.pda),
+  });
 
   // If caller is a dev, surface their submission for this bounty (if any).
   let my_submission: { id: string; status: string } | null = null;
@@ -51,6 +67,8 @@ export async function handleBountiesGet(raw: unknown) {
       id: row.id,
       amount_sol: (Number(row.amount) / 1e9).toString(),
       state: row.state,
+      status,
+      chain_id: getChainId(),
       pda: row.pda,
       github_issue_url: row.github_issue_url,
       title: meta?.title ?? null,
@@ -58,7 +76,7 @@ export async function handleBountiesGet(raw: unknown) {
       release_mode: meta?.release_mode ?? null,
       evaluation_criteria: meta?.evaluation_criteria ?? null,
       reject_threshold: meta?.reject_threshold ?? null,
-      submission_count: row.submission_count,
+      submission_count: submissionCount,
       created_at: row.created_at,
     },
     my_submission,
