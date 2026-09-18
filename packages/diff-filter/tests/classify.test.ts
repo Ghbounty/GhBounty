@@ -13,6 +13,8 @@ describe("classifyPath — lockfiles", () => {
     "composer.lock",
     "flake.lock",
     "uv.lock",
+    "stack.yaml.lock",
+    "paket.lock",
     "relayer/pnpm-lock.yaml",
     "nested/deep/Cargo.lock",
   ])("marks %s as lockfile", (path) => {
@@ -49,6 +51,15 @@ describe("classifyPath — generated dirs", () => {
     "app/.next/static/chunks/webpack.js",
     "coverage/lcov-report/index.html",
     "__pycache__/module.cpython-311.pyc",
+    "obj/Debug/net8.0/app.dll",
+    "zig-out/bin/app",
+    "bazel-out/k8-opt/bin/main",
+    "buck-out/gen/output.bin",
+    ".stack-work/dist/build/main",
+    "dist-newstyle/build/cache",
+    ".lake/build/bin/main",
+    "elm-stuff/0.19.1/summary.dat",
+    "nimcache/main.c",
   ])("marks %s as generated_dir", (path) => {
     const r = classifyPath(path);
     expect(r.ignore).toBe(true);

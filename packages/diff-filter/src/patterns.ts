@@ -12,6 +12,8 @@ export const LOCKFILE_NAMES = new Set<string>([
   "flake.lock",
   "go.sum",
   "uv.lock",
+  "stack.yaml.lock",
+  "paket.lock",
 ]);
 
 export const BINARY_EXTENSIONS = new Set<string>([
@@ -83,6 +85,15 @@ export const GENERATED_DIR_PREFIXES = [
   ".ruff_cache/",
   ".venv/",
   "venv/",
+  "obj/",
+  "zig-out/",
+  "bazel-out/",
+  "buck-out/",
+  ".stack-work/",
+  "dist-newstyle/",
+  ".lake/",
+  "elm-stuff/",
+  "nimcache/",
 ];
 
 export const GENERATED_FILE_SUFFIXES = [
