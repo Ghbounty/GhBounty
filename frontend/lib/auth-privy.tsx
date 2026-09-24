@@ -32,6 +32,7 @@ import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/utils/supabase/client";
+import { backfillWalletPubkey, solanaWalletAddress } from "@/lib/wallet-pubkey-sync";
 import type { Database } from "./db.types";
 import type { Company, Dev, User } from "./types";
 import { AuthCtx } from "./auth-context";
@@ -194,6 +195,7 @@ async function loadUser(supabase: DBClient, userId: string): Promise<User | null
       id: profile.user_id,
       role: "company",
       email: profile.email ?? "",
+      wallet: profile.wallet_pubkey ?? undefined,
       name: company.name,
       description: company.description,
       website: company.website ?? undefined,
@@ -213,6 +215,7 @@ async function loadUser(supabase: DBClient, userId: string): Promise<User | null
     id: profile.user_id,
     role: "dev",
     email: profile.email ?? "",
+    wallet: profile.wallet_pubkey ?? undefined,
     username: dev.username,
     bio: dev.bio ?? undefined,
     github: dev.github_handle ?? undefined,
@@ -239,6 +242,9 @@ type PendingRegistration =
 
 function PrivyAuthInner({ children }: { children: ReactNode }) {
   const privy = usePrivy();
+  // GHB-167: address of the Privy-provisioned/linked Solana wallet, used to
+  // backfill profiles.wallet_pubkey without signing delegation.
+  const solanaAddress = solanaWalletAddress(privy.user?.linkedAccounts ?? []);
   const supabase = useMemo<DBClient>(() => createClient(), []);
   const [user, setUser] = useState<User | null>(null);
   // `hydrating` starts true so refreshes don't flash an "unauthenticated"
@@ -290,8 +296,15 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
       return;
     }
     // Avoid duplicate work if the same user is still authenticated and
-    // already hydrated. Pending registrations always re-run.
-    if (lastUserIdRef.current === privyId && user && !pendingRef.current) {
+    // already hydrated. Pending registrations always re-run. A user whose
+    // wallet is still unmapped also re-runs once the Privy Solana address
+    // arrives (GHB-167 backfill below).
+    if (
+      lastUserIdRef.current === privyId &&
+      user &&
+      !pendingRef.current &&
+      (user.wallet || !solanaAddress)
+    ) {
       // Already hydrated for this Privy DID; make sure we're not stuck in
       // the initial `hydrating=true` state.
       setHydrating(false);
@@ -329,6 +342,23 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
       }
 
       if (cancelled) return;
+      // GHB-167: existing accounts can reach here with wallet_pubkey still
+      // null (the column is only written at signup or via delegation). Map
+      // the already-provisioned Privy wallet so MCP whoami/submissions see
+      // it without requiring signing delegation. Idempotent: only fires
+      // when the column is null.
+      if (u && !u.wallet && solanaAddress) {
+        const backfill = await backfillWalletPubkey(supabase, {
+          user_id: privyId,
+          wallet_pubkey: solanaAddress,
+        });
+        if (!backfill.ok) {
+          console.error("[auth-privy] wallet backfill failed:", backfill.detail);
+        } else if (backfill.updated) {
+          u = (await loadUser(supabase, privyId)) ?? u;
+        }
+      }
+      if (cancelled) return;
       lastUserIdRef.current = privyId;
       setUser(u);
       setHydrating(false);
@@ -338,7 +368,7 @@ function PrivyAuthInner({ children }: { children: ReactNode }) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [privy.ready, privy.authenticated, privy.user?.id, supabase]);
+  }, [privy.ready, privy.authenticated, privy.user?.id, solanaAddress, supabase]);
 
   const refresh = useCallback(() => {
     const privyId = privy.user?.id ?? null;
