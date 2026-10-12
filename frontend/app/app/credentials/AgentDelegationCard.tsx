@@ -117,7 +117,9 @@ export function AgentDelegationCard() {
   async function onAuthorize() {
     if (!solanaWallet) return;
     if (!SIGNER_ID) {
-      setError("Missing NEXT_PUBLIC_PRIVY_SIGNER_ID env var.");
+      setError(
+        "Missing NEXT_PUBLIC_PRIVY_SIGNER_ID env var. Set it (Privy Dashboard > Signers) and rebuild the frontend — NEXT_PUBLIC_* vars are inlined at build time.",
+      );
       return;
     }
     setError(null);
@@ -446,6 +448,14 @@ export function AgentDelegationCard() {
       {!solanaWallet && (
         <p className="modal-note" style={{ marginBottom: 0 }}>
           No Solana wallet found. Connect a Solana wallet first.
+        </p>
+      )}
+
+      {!SIGNER_ID && (
+        <p className="modal-note" style={{ marginBottom: 0 }}>
+          Deployment config missing: NEXT_PUBLIC_PRIVY_SIGNER_ID is not set,
+          so authorization will fail. Set it from Privy Dashboard &gt; Signers
+          and rebuild — NEXT_PUBLIC_* env vars are inlined at build time.
         </p>
       )}
     </section>
